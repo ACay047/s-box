@@ -1162,7 +1162,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		return hOutFace.IsValid;
 	}
 
-	private HalfEdgeHandle FindEdgeConnectingVertices( VertexHandle hVertexA, VertexHandle hVertexB )
+	public HalfEdgeHandle FindEdgeConnectingVertices( VertexHandle hVertexA, VertexHandle hVertexB )
 	{
 		return Topology.FindFullEdgeConnectingVertices( hVertexA, hVertexB );
 	}
@@ -4325,7 +4325,7 @@ public sealed partial class PolygonMesh : IJsonConvert
 		return Topology.GetOppositeFaceConnectedToFullEdge( hEdge, hFace );
 	}
 
-	private void FindVerticesConnectedToEdges( IReadOnlyList<HalfEdgeHandle> edgeList, out VertexHandle[] outVertices )
+	public void FindVerticesConnectedToEdges( IReadOnlyList<HalfEdgeHandle> edgeList, out VertexHandle[] outVertices )
 	{
 		Topology.FindVerticesConnectedToFullEdges( edgeList, out outVertices );
 	}

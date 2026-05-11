@@ -29,6 +29,7 @@ public sealed partial class VertexTool( MeshTool tool ) : SelectionTool<MeshVert
 		AddMenuOption( ops, "Bevel Verts", "straighten", "mesh.bevel", true );
 
 		var sel = menu.AddMenu( "Vertex Selection", "select_all" );
+		AddMenuOption( sel, "Select Loop", "all_out", "mesh.select-loop", count > 1 );
 		AddMenuOption( sel, "Invert Selection", "swap_vert", InvertCurrentSelection, "mesh.invert-selection", true );
 		sel.AddOption( "Select All", "select_all", () => InvokeShortcut( "mesh.select-all" ), "mesh.select-all" );
 	}
