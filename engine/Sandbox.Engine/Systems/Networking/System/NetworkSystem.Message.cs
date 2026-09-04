@@ -120,6 +120,10 @@ internal partial class NetworkSystem
 
 		var type = msg.Data.Read<InternalMessageType>();
 
+		// Leaving host: only acknowledgements matter now
+		if ( _isHandingOff && type != InternalMessageType.Packed )
+			return;
+
 		if ( type == InternalMessageType.HeartbeatPing )
 		{
 			OnHeartbeatPingMessage( msg.Data, msg.Source );
@@ -195,6 +199,9 @@ internal partial class NetworkSystem
 				Log.Warning( $"Got packed null message from {msg.Source}!" );
 				return;
 			}
+
+			if ( _isHandingOff && obj is not HostHandoffAckMsg and not HostLeavingAckMsg )
+				return;
 
 			if ( responseTo != Guid.Empty )
 			{
