@@ -94,6 +94,7 @@ public sealed class PanelStyle : Styles
 		// yet would leave its children holding rules from the old sheet, so a stylesheet swap only
 		// applied to part of the tree.
 		_styleBlocks = null;
+		panel.StyleSelectorsChanged( false, false );
 
 		foreach ( var child in panel.Children )
 		{
