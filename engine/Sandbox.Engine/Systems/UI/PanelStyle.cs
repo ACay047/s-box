@@ -221,17 +221,14 @@ public sealed class PanelStyle : Styles
 			LastActiveRules ??= new();
 			activeRules ??= new();
 
-			foreach ( var rule in activeRules )
-			{
-				if ( !LastActiveRules.Contains( rule ) )
-					OnRuleAdded( rule );
-			}
+			// Rules are ordered by cascade priority. Only the winning sound rule can trigger.
+			var soundIn = activeRules.LastOrDefault( x => x.Block.Styles.SoundIn != null );
+			if ( soundIn != null && !LastActiveRules.Contains( soundIn ) )
+				OnRuleAdded( soundIn );
 
-			foreach ( var rule in LastActiveRules )
-			{
-				if ( !activeRules.Contains( rule ) )
-					OnRuleRemoved( rule );
-			}
+			var soundOut = LastActiveRules.LastOrDefault( x => x.Block.Styles.SoundOut != null );
+			if ( soundOut != null && !activeRules.Contains( soundOut ) )
+				OnRuleRemoved( soundOut );
 
 			LastActiveRules.Clear();
 			LastActiveRules.AddRange( activeRules );
