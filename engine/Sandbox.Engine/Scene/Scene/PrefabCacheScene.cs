@@ -16,7 +16,11 @@ internal partial class PrefabCacheScene : PrefabScene
 	/// Contains the the JSON for the prefab after loading it's cached scene and expanding all prefab instances.
 	/// We cache this since we use this quite often to resolve nested prefab instance overrides.
 	/// </summary>
-	internal JsonObject FullPrefabInstanceJson { get; set; }
+	internal JsonObject FullPrefabInstanceJson { get; private set; }
+
+	private Func<JsonObject, Json.Patch> calculateDifferences;
+
+	internal Json.Patch CalculateDifferences( JsonObject instance ) => calculateDifferences( instance );
 
 	/// <summary>
 	/// Contains all the prefab files that are referenced by this prefab scene.
@@ -32,6 +36,7 @@ internal partial class PrefabCacheScene : PrefabScene
 		using var sourceScope = ActionGraph.PushSerializationOptions( resource.SerializationOptions with { ForceUpdateCached = IsEditor } );
 		using var suppressBlobs = BlobDataSerializer.Suppress();
 		FullPrefabInstanceJson = Serialize( new SerializeOptions { SerializePrefabForDiff = true } );
+		calculateDifferences = Json.CreateDifferenceCalculator( FullPrefabInstanceJson, DiffObjectDefinitions );
 
 		// Iterate all gameobjects in scene and find prefab instances, add them to reference set
 		referencedPrefabs = GetAllObjects( false ).Where( o => o.IsPrefabInstanceRoot ).Select( p => ResourceLibrary.Get<PrefabFile>( p.PrefabInstanceSource ) ).ToHashSet();
