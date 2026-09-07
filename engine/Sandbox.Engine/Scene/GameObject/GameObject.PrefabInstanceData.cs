@@ -592,7 +592,11 @@ internal class PrefabInstanceData
 		var prefabScene = (PrefabCacheScene)prefabGameObject.Scene;
 		prefabScene.ToPrefabFile();
 
-		PrefabInstanceData.ConvertAllPrefabInstancesToNested( go );
+		// Applying to this instance's source must preserve the root's ownership.
+		if ( go == _instanceRoot )
+			ConvertChildPrefabInstancesToNested( go );
+		else
+			ConvertAllPrefabInstancesToNested( go );
 
 		RefreshPatch();
 	}
