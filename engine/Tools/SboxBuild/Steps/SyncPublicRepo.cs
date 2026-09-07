@@ -212,6 +212,12 @@ internal class SyncPublicRepo( bool dryRun = false )
 				return false;
 			}
 
+			// Upload macOS binaries
+			if ( !TryUploadBuildArtifacts( repositoryRoot, remoteBase, "osxarm64", dryRun, ref uploadedArtifacts, uploadedArtifactHashes, uploadedArtifactPaths ) )
+			{
+				return false;
+			}
+
 			//
 			// Start working with the shallow clone
 			//
