@@ -565,41 +565,54 @@ public class TerrainComponentTest
 	}
 
 	/// <summary>
-	/// FindClosestPoint resolves a query against the heightfield collider instead of falling
-	/// back to the body origin. A point high above the centre plateau snaps straight down onto
-	/// the plateau surface, keeping its horizontal position and landing at the full terrain
-	/// height, and a point over the flat base snaps down to height zero - two distinct world
-	/// queries return two distinct surface points rather than the same constant.
+	/// Closest-point queries agree with the Z-up heightmap before and after collider rebuilds.
 	/// </summary>
 	[TestMethod]
-	public void FindClosestPointSnapsToHeightfieldSurface()
+	[DataRow( 0.0f )]
+	[DataRow( 300.0f )]
+	public void FindClosestPointSnapsToHeightfieldSurface( float elevation )
 	{
 		var scene = new Scene();
 		using var sceneScope = scene.Push();
-
 		var storage = CreateSmallStorage();
 		RaiseCenterPlateau( storage );
-
 		var go = scene.CreateObject();
+		go.WorldPosition = Vector3.Up * elevation;
 		var terrain = go.Components.Create<Terrain>( false );
 		terrain.Storage = storage;
 		terrain.Enabled = true;
 
-		Assert.IsTrue( terrain.KeyBody.IsValid(), "The terrain needs a keyframe body to query against" );
+		for ( int stage = 0; stage < 3; stage++ )
+		{
+			if ( stage == 1 )
+			{
+				terrain.EnableCollision = false;
+				terrain.EnableCollision = true;
+			}
+			else if ( stage == 2 )
+			{
+				elevation += 200;
+				go.WorldPosition = Vector3.Up * elevation;
+				scene.GameTick();
+			}
 
-		var overPlateau = terrain.FindClosestPoint( new Vector3( 3150, 5000, 3150 ) );
+			Assert.IsTrue( terrain.KeyBody.IsValid() );
+			Assert.IsTrue( go.WorldPosition.AlmostEqual( Vector3.Up * elevation ), "Rebuilding must not move the terrain object" );
+			Assert.IsTrue( go.WorldRotation.AlmostEqual( Rotation.Identity ), "The heightfield's internal rotation must not rotate the terrain object" );
+			var plateauQuery = new Vector3( 3150, 3150, elevation + 5000 );
+			var overPlateau = terrain.FindClosestPoint( plateauQuery );
+			Assert.AreEqual( 3150.0f, overPlateau.x, 75.0f );
+			Assert.AreEqual( 3150.0f, overPlateau.y, 75.0f );
+			Assert.AreEqual( elevation + 1000, overPlateau.z, 25.0f, "The plateau height is measured along world Z" );
+			Assert.IsTrue( terrain.RayIntersects( new Ray( plateauQuery, Vector3.Down ), 6000, out var plateauHit ) );
+			Assert.IsTrue( overPlateau.AlmostEqual( go.WorldTransform.PointToWorld( plateauHit ), 75 ), "Physics and heightmap queries must agree" );
 
-		Assert.AreEqual( 3150.0f, overPlateau.x, 75.0f, "The closest point keeps the query's ground position" );
-		Assert.AreEqual( 1000.0f, overPlateau.y, 25.0f, "The closest point sits on the plateau surface, not the body origin" );
-		Assert.AreEqual( 3150.0f, overPlateau.z, 75.0f );
-
-		var overBase = terrain.FindClosestPoint( new Vector3( 800, 300, 800 ) );
-
-		Assert.AreEqual( 800.0f, overBase.x, 75.0f );
-		Assert.AreEqual( 0.0f, overBase.y, 25.0f, "The flat base sits at height zero" );
-		Assert.AreEqual( 800.0f, overBase.z, 75.0f );
-
-		Assert.AreNotEqual( overPlateau, overBase, "Distinct queries resolve to distinct surface points, not one constant" );
+			var overBase = terrain.FindClosestPoint( new Vector3( 800, 800, elevation + 300 ) );
+			Assert.AreEqual( 800.0f, overBase.x, 75.0f );
+			Assert.AreEqual( 800.0f, overBase.y, 75.0f );
+			Assert.AreEqual( elevation, overBase.z, 25.0f, "The flat base follows the terrain object's elevation" );
+			Assert.AreNotEqual( overPlateau, overBase );
+		}
 
 		go.Destroy();
 		scene.ProcessDeletes();
