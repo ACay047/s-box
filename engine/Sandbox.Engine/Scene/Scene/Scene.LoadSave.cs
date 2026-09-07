@@ -82,6 +82,7 @@ public partial class Scene : GameObject
 			}
 
 			ProcessDeletes();
+			NavMesh.Reset();
 		}
 
 		if ( !IsEditor && options.ShowLoadingScreen )
