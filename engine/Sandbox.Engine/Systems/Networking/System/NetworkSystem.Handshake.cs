@@ -363,16 +363,15 @@ internal partial class NetworkSystem
 
 		log.Trace( $"[{this}] Requesting a snapshot" );
 
-		var snapshot = SnapshotMsg.Create();
-		GameSystem?.GetSnapshot( source, ref snapshot );
-
-		var output = new InitialSnapshotResponse
+		var handshakeId = source.HandshakeId;
+		if ( GameSystem is not null )
 		{
-			HandshakeId = source.HandshakeId,
-			Snapshot = snapshot
-		};
-
-		source.SendMessage( output );
+			GameSystem.SendSnapshot( source, snapshot => new InitialSnapshotResponse { HandshakeId = handshakeId, Snapshot = snapshot } );
+		}
+		else
+		{
+			source.SendMessage( new InitialSnapshotResponse { HandshakeId = handshakeId, Snapshot = SnapshotMsg.Create() } );
+		}
 		return Task.CompletedTask;
 	}
 

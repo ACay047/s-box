@@ -34,14 +34,30 @@ public abstract partial class GameNetworkSystem : IDisposable
 
 	public virtual void GetSnapshot( Connection source, ref SnapshotMsg msg ) { }
 
-	internal virtual IEnumerable<(Connection Connection, SnapshotMsg Snapshot)> GetResyncSnapshots( IEnumerable<Connection> connections )
+	internal virtual SnapshotCapture CaptureSnapshot( Connection source, bool handoff = false, SnapshotCapture shared = null ) => null;
+
+	internal SnapshotCapture SendSnapshot<T>( Connection target, Func<SnapshotMsg, T> envelope, bool handoff = false, SnapshotCapture shared = null,
+		NetFlags flags = NetFlags.Reliable )
 	{
-		foreach ( var connection in connections )
+		var capture = CaptureSnapshot( target, handoff, shared );
+		if ( capture is not null )
+		{
+			target.SendSnapshot( capture, envelope, flags );
+		}
+		else
 		{
 			var snapshot = SnapshotMsg.Create();
-			GetSnapshot( connection, ref snapshot );
-			yield return (connection, snapshot);
+			if ( handoff )
+			{
+				GetHandoffSnapshot( ref snapshot );
+			}
+			else
+			{
+				GetSnapshot( target, ref snapshot );
+			}
+			target.SendMessage( envelope( snapshot ), flags );
 		}
+		return capture;
 	}
 
 	/// <summary>

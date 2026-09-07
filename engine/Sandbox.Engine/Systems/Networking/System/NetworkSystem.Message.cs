@@ -83,6 +83,16 @@ internal partial class NetworkSystem
 		// This network system only exists in the game.
 		using var gameScope = GameSystem?.Push();
 
+		if ( _connections.Any( c => c.HasPendingSends ) )
+		{
+			// A failed encoder can close a connection while we drain the queue.
+			foreach ( var connection in _connections.ToArray() )
+			{
+				connection.FlushPendingSends();
+			}
+		}
+		Connection?.FlushPendingSends();
+
 		foreach ( var socket in sockets )
 		{
 			socket?.GetIncomingMessages( HandleIncomingMessage );

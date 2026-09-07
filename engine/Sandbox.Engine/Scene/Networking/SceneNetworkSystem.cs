@@ -315,18 +315,7 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 
 		connection.State = Connection.ChannelState.Snapshot;
 
-		var output = new LoadSceneSnapshotMsg { SceneId = msg.SceneId, Id = msg.Id };
-		var snapshot = SnapshotMsg.Create();
-
-		GetSnapshot( connection, ref snapshot );
-		output.Snapshot = snapshot;
-
-		var bs = ByteStream.Create( 256 );
-		bs.Write( InternalMessageType.Packed );
-
-		Networking.System.Serialize( output, ref bs );
-		connection.SendStream( bs );
-		bs.Dispose();
+		SendSnapshot( connection, snapshot => new LoadSceneSnapshotMsg { SceneId = msg.SceneId, Id = msg.Id, Snapshot = snapshot } );
 	}
 
 	/// <summary>
@@ -410,6 +399,18 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 		GetSnapshot( source, ref msg, includeLocalObjects: false );
 	}
 
+	internal override SnapshotCapture CaptureSnapshot( Connection source, bool handoff = false, SnapshotCapture shared = null )
+	{
+		var capture = new SnapshotCapture();
+		GetSnapshot( handoff ? null : source, ref capture.Snapshot, handoff, shared?.Snapshot, capture );
+		if ( shared is not null )
+		{
+			capture.SceneJson = shared.SceneJson;
+			capture.SceneBlobs = shared.SceneBlobs;
+		}
+		return capture;
+	}
+
 	/// <summary>
 	/// Handoff snapshot: nothing culled, NetworkMode.Never objects included.
 	/// </summary>
@@ -418,19 +419,7 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 		GetSnapshot( null, ref msg, includeLocalObjects: true );
 	}
 
-	internal override IEnumerable<(Connection Connection, SnapshotMsg Snapshot)> GetResyncSnapshots( IEnumerable<Connection> connections )
-	{
-		SnapshotMsg? shared = null;
-		foreach ( var connection in connections )
-		{
-			var snapshot = SnapshotMsg.Create();
-			GetSnapshot( connection, ref snapshot, false, shared );
-			shared ??= snapshot;
-			yield return (connection, snapshot);
-		}
-	}
-
-	private void GetSnapshot( Connection source, ref SnapshotMsg msg, bool includeLocalObjects, SnapshotMsg? shared = null )
+	private void GetSnapshot( Connection source, ref SnapshotMsg msg, bool includeLocalObjects, SnapshotMsg? shared = null, SnapshotCapture capture = null )
 	{
 		ThreadSafe.AssertIsMainThread();
 		using var _ = PerformanceStats.Timings.Network.Scope();
@@ -450,8 +439,19 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 			using ( analytic.ScopeTimer( "SceneTime" ) )
 			{
 				using var blobs = BlobDataSerializer.Capture();
-				msg.SceneData = Game.ActiveScene.Serialize( includeLocalObjects ? _handoffSerializeOptions : _snapshotSerializeOptions ).ToJsonString();
-				msg.BlobData = blobs.ToByteArray();
+				var json = Game.ActiveScene.Serialize( includeLocalObjects ? _handoffSerializeOptions : _snapshotSerializeOptions );
+				if ( capture is null )
+				{
+					msg.SceneData = json.ToJsonString();
+					msg.BlobData = blobs.ToByteArray();
+				}
+				else
+				{
+					var detached = SnapshotCapture.Detach( json );
+					capture.SceneJson = new Lazy<string>( () => detached.ToJsonString() );
+					var detachedBlobs = blobs.Detach();
+					capture.SceneBlobs = new Lazy<byte[]>( () => BlobDataSerializer.PackBlobs( detachedBlobs ) );
+				}
 			}
 
 			foreach ( var system in Game.ActiveScene.GetSystems() )
@@ -468,10 +468,13 @@ public partial class SceneNetworkSystem : GameNetworkSystem
 
 		using ( analytic.ScopeTimer( "NetworkObjectTime" ) )
 		{
-			Game.ActiveScene.SerializeNetworkObjects( source, msg.NetworkObjects, includeLocalObjects );
+			Game.ActiveScene.SerializeNetworkObjects( source, msg.NetworkObjects, includeLocalObjects, capture );
 		}
 
-		analytic.SetValue( "SceneDataLength", msg.SceneData?.Length ?? 0 );
+		if ( capture is null )
+		{
+			analytic.SetValue( "SceneDataLength", msg.SceneData?.Length ?? 0 );
+		}
 		analytic.SetValue( "NetworkObjectCount", msg.NetworkObjects?.Count ?? 0 );
 		analytic.SetValue( "GameObjectCount", Game.ActiveScene.Directory.GameObjectCount );
 		analytic.SetValue( "ComponentCount", Game.ActiveScene.Directory.ComponentCount );

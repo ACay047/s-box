@@ -19,7 +19,40 @@ using static GlobalGameNamespace;
 [TestClass]
 public class HostMigrationTest
 {
+	static void DrainSnapshot( Connection connection )
+	{
+		var deadline = DateTime.UtcNow.AddSeconds( 10 );
+		while ( connection.HasPendingSends && DateTime.UtcNow < deadline )
+		{
+			connection.FlushPendingSends();
+			System.Threading.Thread.Sleep( 1 );
+		}
+		Assert.IsFalse( connection.HasPendingSends, "Snapshot encoding timed out" );
+	}
 	private TypeLibrary _oldTypeLibrary;
+
+	[TestMethod]
+	public void CapturedSnapshotKeepsStateAfterSceneChanges()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+		clientAndHost.BecomeHost();
+		var go = new GameObject( "Before capture" );
+		go.Components.Create<CounterComponent>().Value = 7;
+		go.NetworkSpawn( null );
+		var expected = SnapshotMsg.Create();
+		SceneNetworkSystem.Instance.GetSnapshot( clientAndHost.Client, ref expected );
+		var captured = SceneNetworkSystem.Instance.CaptureSnapshot( clientAndHost.Client );
+		go.Name = "After capture";
+		go.Components.Get<CounterComponent>().Value = 99;
+		go.Destroy();
+		var actual = Task.Run( captured.Materialize ).GetAwaiter().GetResult();
+		Assert.AreEqual( expected.SceneData, actual.SceneData );
+		var before = expected.NetworkObjects.OfType<ObjectCreateMsg>().Single( x => x.Guid == go.Id );
+		var after = actual.NetworkObjects.OfType<ObjectCreateMsg>().Single( x => x.Guid == go.Id );
+		Assert.AreEqual( before.JsonData, after.JsonData );
+		CollectionAssert.AreEqual( before.TableData, after.TableData );
+	}
 
 	[TestInitialize]
 	public void TestInitialize()
@@ -71,6 +104,7 @@ public class HostMigrationTest
 		Receive( clientAndHost.Client, new HostLeavingAckMsg() );
 		Assert.IsFalse( Networking.System.PumpHostHandoff() );
 
+		DrainSnapshot( clientAndHost.Client );
 		var handoff = clientAndHost.Client.Messages.Select( m => m.Payload ).OfType<HostHandoffMsg>().ToArray();
 		Assert.AreEqual( 1, handoff.Length, "The successor should receive exactly one handoff" );
 		Assert.IsTrue( handoff[0].Snapshot.NetworkObjects.OfType<ObjectCreateMsg>().Any( x => x.Guid == go.Id ), "The handoff snapshot should carry the networked objects" );
@@ -344,12 +378,14 @@ public class HostMigrationTest
 
 		Receive( successorFirst ? other : successor, new HostLeavingAckMsg() );
 		Assert.IsFalse( Networking.System.PumpHostHandoff() );
+		DrainSnapshot( successor );
 		Assert.AreEqual( 1, successor.Messages.Count( m => m.Payload is HostHandoffMsg ) );
 
 		Receive( other, new HostHandoffAckMsg() );
 		Assert.IsFalse( Networking.System.PumpHostHandoff(), "Only the chosen successor can acknowledge the snapshot" );
 		Receive( successor, new HostHandoffAckMsg() );
 		Assert.IsTrue( Networking.System.PumpHostHandoff() );
+		DrainSnapshot( successor );
 		Assert.AreEqual( 1, successor.Messages.Count( m => m.Payload is HostHandoffMsg ) );
 	}
 
@@ -474,10 +510,14 @@ public class HostMigrationTest
 		go.NetworkSpawn();
 		go.Network.AlwaysTransmit = false;
 
-		var snapshots = SceneNetworkSystem.Instance.GetResyncSnapshots( new[] { peers.Client, third } ).ToArray();
+		var first = SceneNetworkSystem.Instance.CaptureSnapshot( peers.Client );
+		var second = SceneNetworkSystem.Instance.CaptureSnapshot( third, shared: first );
+		var snapshots = Task.WhenAll( Task.Run( first.Materialize ), Task.Run( second.Materialize ) ).GetAwaiter().GetResult();
 		Assert.AreEqual( 1, system.Writes, "Capture shared system state once for the entire migration" );
-		Assert.IsTrue( snapshots[0].Snapshot.NetworkObjects.OfType<ObjectCreateMsg>().Any( m => m.Guid == go.Id ) );
-		Assert.IsFalse( snapshots[1].Snapshot.NetworkObjects.OfType<ObjectCreateMsg>().Any( m => m.Guid == go.Id ), "Visibility must still be evaluated for each recipient" );
+		Assert.AreSame( snapshots[0].SceneData, snapshots[1].SceneData );
+		Assert.AreSame( snapshots[0].GameObjectSystems, snapshots[1].GameObjectSystems );
+		Assert.IsTrue( snapshots[0].NetworkObjects.OfType<ObjectCreateMsg>().Any( m => m.Guid == go.Id ) );
+		Assert.IsFalse( snapshots[1].NetworkObjects.OfType<ObjectCreateMsg>().Any( m => m.Guid == go.Id ), "Visibility must still be evaluated for each recipient" );
 	}
 
 	private class PeerVisibility : Component, Component.INetworkVisible

@@ -690,7 +690,7 @@ internal sealed partial class NetworkObject : IValid, IDeltaSnapshot
 	private static readonly GameObject.SerializeOptions _createSerializeOptions = new() { SingleNetworkObject = true, SkipNulls = true };
 	private static readonly GameObject.SerializeOptions _handoffSerializeOptions = new() { SingleNetworkObject = true, SkipNulls = true, IncludeLocalObjects = true };
 
-	internal ObjectCreateMsg GetCreateMessage( bool includeLocalObjects = false )
+	internal ObjectCreateMsg GetCreateMessage( bool includeLocalObjects = false, SnapshotCapture capture = null )
 	{
 		if ( GameObject.Parent is null )
 		{
@@ -704,13 +704,14 @@ internal sealed partial class NetworkObject : IValid, IDeltaSnapshot
 			throw new( $"Unable to serialize {GameObject.Id} ({GameObject.Name})" );
 		}
 
+		capture?.AddObject( jsonData, blobs );
 		var create = new ObjectCreateMsg
 		{
 			Guid = GameObject.Id,
 			SnapshotVersion = GameObject._net.LocalSnapshotState.Version,
 			Transform = GameObject.Transform.TargetLocal,
-			JsonData = jsonData.ToJsonString(),
-			BlobData = blobs.ToByteArray(),
+			JsonData = capture is null ? jsonData.ToJsonString() : null,
+			BlobData = capture is null ? blobs.ToByteArray() : null,
 			Creator = Creator,
 			Parent = GameObject.Parent.Id,
 			Owner = Owner,

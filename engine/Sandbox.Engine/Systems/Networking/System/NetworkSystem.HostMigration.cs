@@ -132,10 +132,8 @@ internal partial class NetworkSystem
 
 		Log.Info( $"Handing off host to {successor}" );
 
-		var snapshot = SnapshotMsg.Create();
-		GameSystem.GetHandoffSnapshot( ref snapshot );
 		_migrationPhase = MigrationPhase.HandingOff;
-		successor.SendMessage( new HostHandoffMsg { Snapshot = snapshot }, NetFlags.Reliable | NetFlags.SendImmediate );
+		GameSystem.SendSnapshot( successor, snapshot => new HostHandoffMsg { Snapshot = snapshot }, handoff: true, flags: NetFlags.Reliable | NetFlags.SendImmediate );
 
 		foreach ( var socket in sockets )
 		{
@@ -273,8 +271,11 @@ internal partial class NetworkSystem
 
 			if ( GameSystem is not null )
 			{
-				foreach ( var (connection, resync) in GameSystem.GetResyncSnapshots( peers.Where( c => c.State >= Connection.ChannelState.Welcome ) ) )
-					StartResync( connection, resync );
+				SnapshotCapture shared = null;
+				foreach ( var connection in peers.Where( c => c.State >= Connection.ChannelState.Welcome ) )
+				{
+					shared = StartResync( connection, shared );
+				}
 			}
 
 			foreach ( var socket in sockets )
@@ -298,11 +299,12 @@ internal partial class NetworkSystem
 		}
 	}
 
-	void StartResync( Connection connection, SnapshotMsg snapshot )
+	SnapshotCapture StartResync( Connection connection, SnapshotCapture shared )
 	{
 		_pendingResyncs.Add( connection.Id );
 		connection.State = Connection.ChannelState.Snapshot;
-		connection.SendMessage( new HostResyncMsg { PreviousHostId = _leavingHost?.Id ?? Guid.Empty, Snapshot = snapshot } );
+		var previousHostId = _leavingHost?.Id ?? Guid.Empty;
+		return GameSystem.SendSnapshot( connection, snapshot => new HostResyncMsg { PreviousHostId = previousHostId, Snapshot = snapshot }, shared: shared );
 	}
 
 	async Task OnHostResync( HostResyncMsg msg, Connection source, Guid msgId )

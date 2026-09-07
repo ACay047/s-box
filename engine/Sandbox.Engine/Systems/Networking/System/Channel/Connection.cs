@@ -359,9 +359,19 @@ public abstract partial class Connection : BytePack.ISerializer
 
 	internal virtual void Send( byte[] encoded, NetFlags flags )
 	{
+		if ( sendsClosed )
+		{
+			return;
+		}
+		if ( pendingSends.Count > 0 )
+		{
+			QueueSend( Task.FromResult( CreatePackets( encoded, flags ) ), flags );
+			return;
+		}
+
 		var isReliable = (flags & NetFlags.Reliable) != 0;
 
-		if ( !isReliable || encoded.Length < MaxChunkSize )
+		if ( !isReliable || encoded.Length <= MaxChunkSize )
 		{
 			InternalSend( encoded, flags );
 			return;
@@ -393,6 +403,15 @@ public abstract partial class Connection : BytePack.ISerializer
 
 	internal void Close( int reasonCode, string reasonString )
 	{
+		if ( sendsClosed )
+		{
+			return;
+		}
+		sendsClosed = true;
+		snapshotCancellation?.Cancel();
+		snapshotCancellation?.Dispose();
+		snapshotCancellation = null;
+		pendingSends.Clear();
 		_chunkBufferLength = -1;
 		InternalClose( reasonCode, reasonString );
 	}
