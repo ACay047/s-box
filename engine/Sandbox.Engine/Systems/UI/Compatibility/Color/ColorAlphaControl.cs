@@ -1,16 +1,12 @@
-using Microsoft.AspNetCore.Components;
-using Sandbox.Diagnostics;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using static Sandbox.Internal.GlobalGameNamespace;
+using System.ComponentModel;
 
 namespace Sandbox.UI;
 
 /// <summary>
-/// A control for editing Color properties. Displays a text entry that can be edited, and a color swatch which pops up a mixer.
+/// Legacy control for editing the alpha of a Color property. Use ColorPickerControl for new UI.
 /// </summary>
+[Hide, EditorBrowsable( EditorBrowsableState.Never )]
+[Obsolete( "Use ColorPickerControl instead." )]
 [StyleSheet.Inline( "coloralphacontrol", Styles )]
 public partial class ColorAlphaControl : BaseControl
 {
@@ -77,6 +73,8 @@ public partial class ColorAlphaControl : BaseControl
 
 	void UpdateFromColor()
 	{
+		if ( Property is null ) return;
+
 		var color = Property.GetValue<Color>();
 		_handle.Style.Left = Length.Percent( color.a * 100f );
 	}
@@ -105,6 +103,8 @@ public partial class ColorAlphaControl : BaseControl
 
 	private void UpdateFromPosition( Vector2 localPosition )
 	{
+		if ( Property is null ) return;
+
 		// Get the bounds of the control
 		var bounds = Box.Rect;
 		if ( bounds.Width <= 0 || bounds.Height <= 0 ) return;

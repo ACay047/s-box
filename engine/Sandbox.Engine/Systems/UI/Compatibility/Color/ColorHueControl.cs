@@ -1,28 +1,28 @@
-using Microsoft.AspNetCore.Components;
-using Sandbox.Diagnostics;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using static Sandbox.Internal.GlobalGameNamespace;
+using System.ComponentModel;
 
 namespace Sandbox.UI;
 
 /// <summary>
-/// A control for editing Color properties. Displays a text entry that can be edited, and a color swatch which pops up a mixer.
+/// Legacy control for editing the hue of a Color property. Use ColorPickerControl for new UI.
 /// </summary>
-[StyleSheet.Inline( "colorsaturationvaluecontrol", Styles )]
-public partial class ColorSaturationValueControl : BaseControl
+[Hide, EditorBrowsable( EditorBrowsableState.Never )]
+[Obsolete( "Use ColorPickerControl instead." )]
+[StyleSheet.Inline( "colorhuecontrol", Styles )]
+public partial class ColorHueControl : BaseControl
 {
 	const string Styles = """
-		ColorSaturationValueControl
+		ColorHueControl
 		{
-			width: 240px;
-			height: 240px;
-			background-color: red;
-			position: relative;
+			gap: 0.5rem;
+			flex-grow: 1;
+			pointer-events: all;
+			background: linear-gradient( to right, red, yellow, lime, cyan, blue, magenta, red );
 			border-radius: 4px;
+			padding: 2px;
+			height: 12px;
+			position: relative;
 			cursor: pointer;
+			margin: 10px 0;
 			border: 1px solid #333;
 
 			&:hover
@@ -37,51 +37,29 @@ public partial class ColorSaturationValueControl : BaseControl
 
 			.handle
 			{
-				width: 16px;
-				height: 16px;
+				top: -5px;
+				bottom: -5px;
+				aspect-ratio: 1;
 				border-radius: 100px;
 				border: 2px solid #444;
 				position: absolute;
 				background-color: white;
 				box-shadow: 2px 2px 16px #000a;
-				transform: translateX( -50% ) translateY( -50% );
+				transform: translateX( -50% );
 				pointer-events: none;
-				z-index: 100;
-				z-index: 100;
-			}
-
-			.gradient
-			{
-				position: absolute;
-				width: 100%;
-				height: 100%;
-				border-radius: 4px;
-				background: linear-gradient( to right, white, rgba( 255, 255, 255, 0 ) );
-
-				&:after
-				{
-					content: "";
-					position: absolute;
-					width: 100%;
-					height: 100%;
-					border-radius: 4px;
-					background: linear-gradient( to top, black, rgba( 0, 0, 0, 0 ) );
-				}
 			}
 		}
 		""";
 
 	readonly Panel _handle;
 
-	float _hue = 0;
-
 	public override bool SupportsMultiEdit => true;
 
-	public ColorSaturationValueControl()
+	float _hue = 0;
+
+	public ColorHueControl()
 	{
 		_handle = AddChild<Panel>( "handle" );
-
-		AddChild<Panel>( "gradient" );
 	}
 
 	public override void Rebuild()
@@ -98,19 +76,17 @@ public partial class ColorSaturationValueControl : BaseControl
 
 	void UpdateFromColor()
 	{
+		if ( Property is null ) return;
+
 		var color = Property.GetValue<Color>();
 		var hsv = color.ToHsv();
 
 		if ( hsv.Saturation > 0.05f && hsv.Value > 0.05f )
 		{
-			_hue = color.ToHsv().Hue;
+			_hue = hsv.Hue;
 		}
 
-		_handle.Style.Left = Length.Percent( hsv.Saturation * 100f );
-		_handle.Style.Top = Length.Percent( (1 - hsv.Value) * 100f );
-		_handle.Style.BackgroundColor = color;
-
-		Style.BackgroundColor = new ColorHsv( _hue, 1f, 1f );
+		_handle.Style.Left = Length.Percent( (_hue / 360.0f) * 100f );
 	}
 
 	protected override void OnMouseDown( MousePanelEvent e )
@@ -137,24 +113,28 @@ public partial class ColorSaturationValueControl : BaseControl
 
 	private void UpdateFromPosition( Vector2 localPosition )
 	{
+		if ( Property is null ) return;
+
 		// Get the bounds of the control
 		var bounds = Box.Rect;
 		if ( bounds.Width <= 0 || bounds.Height <= 0 ) return;
 
 		// Clamp position within bounds
 		float x = Math.Clamp( localPosition.x, 0, bounds.Width );
-		float y = Math.Clamp( localPosition.y, 0, bounds.Height );
 
 		// Calculate saturation and value from position
-		float saturation = x / bounds.Width;
-		float value = 1f - (y / bounds.Height);
+		_hue = (x / bounds.Width) * 360.0f;
+		_hue = _hue.Clamp( 0, 360.0f - 0.001f );
+
+		var color = Property.GetValue<Color>().ToHsv();
 
 		// Create new color with updated saturation and value
-		var newColor = new ColorHsv( _hue, saturation, value ).ToColor();
+		var newColor = color with { Hue = _hue };
 
 		// Set the property to the new color
-		Property.SetValue( newColor );
+		Property.SetValue( newColor.ToColor() );
 
 		UpdateFromColor();
 	}
+
 }
