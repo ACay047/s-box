@@ -27,7 +27,11 @@ public sealed class PanelStyle : Styles
 
 	bool rulesChanged = true;
 
-	public override void Dirty() => isDirty = true;
+	public override void Dirty()
+	{
+		isDirty = true;
+		panel?.SetNeedsPreLayout();
+	}
 	internal bool IsDirty => isDirty;
 
 	internal PanelStyle( Panel panel )
@@ -287,7 +291,7 @@ public sealed class PanelStyle : Styles
 
 	public override bool Set( string property, string value )
 	{
-		isDirty = true;
+		Dirty();
 
 		return base.Set( property, value );
 	}
