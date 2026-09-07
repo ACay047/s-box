@@ -645,11 +645,25 @@ public static partial class Json
 		JsonObject newRoot,
 		HashSet<TrackedObjectDefinition> definitions )
 	{
-		var patch = new Patch();
-
 		// Find objects in old and new JSON structures
 		var oldObjects = FindTrackedObjectsInJson( oldRoot, definitions, forDiff: true );
 		var newObjects = FindTrackedObjectsInJson( newRoot, definitions, forDiff: true );
+		return CalculateDifferences( oldObjects, newObjects );
+	}
+
+	/// <summary>
+	/// Captures a source once for repeated comparisons without exposing the tracking graph.
+	/// Recreate the calculator when the source or object definitions change.
+	/// </summary>
+	internal static Func<JsonObject, Patch> CreateDifferenceCalculator( JsonObject source, HashSet<TrackedObjectDefinition> definitions )
+	{
+		var oldObjects = FindTrackedObjectsInJson( source?.DeepClone().AsObject(), definitions, forDiff: true );
+		return target => CalculateDifferences( oldObjects, FindTrackedObjectsInJson( target, definitions, forDiff: true ) );
+	}
+
+	private static Patch CalculateDifferences( TrackedObjects oldObjects, TrackedObjects newObjects )
+	{
+		var patch = new Patch();
 
 		// Find removed objects
 		foreach ( var oldObj in oldObjects.IdToTrackedObject )

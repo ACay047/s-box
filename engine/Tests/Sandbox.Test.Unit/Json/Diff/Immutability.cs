@@ -46,6 +46,26 @@ public class ImmutabilityTest
 		""" ).AsObject();
 
 	[TestMethod]
+	public void DifferenceCalculatorOwnsItsSourceAndCanBeReused()
+	{
+		var definitions = BuildDefinitions();
+		var source = Source();
+		var expectedSource = source.DeepClone().AsObject();
+		var calculate = Json.CreateDifferenceCalculator( source, definitions );
+		source["company"]["departments"][0]["employees"][0]["role"] = "Changed after capture";
+
+		foreach ( var target in new[] { Target(), expectedSource, Target() } )
+		{
+			var expected = target.DeepClone();
+			var patch = calculate( target );
+			Assert.IsTrue( JsonNode.DeepEquals( Json.SerializeAsObject( Json.CalculateDifferences( expectedSource, target, definitions ) ), Json.SerializeAsObject( patch ) ) );
+			Assert.IsTrue( JsonNode.DeepEquals( expected, Json.ApplyPatch( expectedSource, patch, definitions ) ) );
+			patch.PropertyOverrides.Clear();
+			patch.AddedObjects.Clear();
+		}
+	}
+
+	[TestMethod]
 	public void CalculateDifferences_DoesNotMutateOldRoot()
 	{
 		var defs = BuildDefinitions();
