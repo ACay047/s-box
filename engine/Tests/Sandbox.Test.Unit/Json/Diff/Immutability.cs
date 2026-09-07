@@ -87,6 +87,32 @@ public class ImmutabilityTest
 	}
 
 	[TestMethod]
+	public void CalculateDifferences_PatchOwnsLeafData()
+	{
+		var defs = BuildDefinitions();
+		var source = Source();
+		var target = Target();
+		var departments = target["company"]["departments"].AsArray();
+		var modified = departments[0]["employees"][0];
+		var added = departments[1]["employees"][0];
+		modified["settings"] = JsonNode.Parse( """{"levels":[1,2,3]}""" );
+		added["settings"] = JsonNode.Parse( """{"levels":[4,5,6]}""" );
+		var expected = target.DeepClone();
+		var patch = Json.CalculateDifferences( source, target, defs );
+
+		// Mutating the target after diffing must not change additions or overrides.
+		modified["settings"]["levels"][0] = 99;
+		added["settings"]["levels"][0] = 99;
+		Assert.IsTrue( JsonNode.DeepEquals( expected, Json.ApplyPatch( source, patch, defs ) ) );
+
+		// Patch payloads must also be safe to edit without modifying the target.
+		var before = target.ToJsonString();
+		patch.AddedObjects.First( a => a.Id.IdValue == "201" ).Data["settings"]["levels"][0] = 42;
+		patch.PropertyOverrides.First( p => p.Target.IdValue == "101" && p.Property == "settings" ).Value["levels"][0] = 42;
+		Assert.AreEqual( before, target.ToJsonString() );
+	}
+
+	[TestMethod]
 	public void AddedObject_DataDoesNotContainTrackedChildren()
 	{
 		// Dept 2 is added with employee 201 inside it. AddedObject.Data must not embed the
