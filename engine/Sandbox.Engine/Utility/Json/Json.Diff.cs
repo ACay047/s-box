@@ -254,6 +254,9 @@ public static partial class Json
 		/// <summary>The previous sibling element when contained in an array (null if first or not in array)</summary>
 		public TrackedObject PreviousElement;
 
+		/// <summary>The original next array sibling, used to preserve unchanged runs when moving their first element.</summary>
+		public TrackedObject NextElement;
+
 		/// <summary>Hash of the path to this object in the JSON structure</summary>
 		public ulong PathHash;
 
@@ -581,6 +584,8 @@ public static partial class Json
 
 						// Set the previous element reference
 						trackedObj.PreviousElement = previousElement;
+						if ( previousElement != null )
+							previousElement.NextElement = trackedObj;
 
 						// Current becomes previous for next iteration
 						previousElement = trackedObj;
@@ -909,11 +914,17 @@ public static partial class Json
 
 		// Resolve predecessor dependencies first, so each object only needs moving once.
 		// Conflicting or cyclic partial patches retain the bounded best-effort fallback.
-		int maxIterations = addedObjects.Count + 1;
+		var explicitCount = addedObjects.Count;
+		IncludeUnmovedSuccessors( addedObjects );
+		int maxIterations = explicitCount + 1;
 		if ( TrySortReorderObjects( addedObjects, out var orderedObjects ) )
 		{
 			addedObjects = orderedObjects;
 			maxIterations = 1;
+		}
+		else
+		{
+			addedObjects.RemoveRange( explicitCount, addedObjects.Count - explicitCount );
 		}
 		for ( var iteration = 0; iteration < maxIterations; iteration++ )
 		{
@@ -951,6 +962,32 @@ public static partial class Json
 
 			if ( !changed )
 				break;
+		}
+	}
+
+	private static void IncludeUnmovedSuccessors( List<TrackedObject> objects )
+	{
+		// The diff only records changed predecessor IDs. When a block moves, its
+		// remaining elements still name the same predecessor and have no move entry.
+		// Restore those relationships too, including for patches saved before this fix.
+		var predecessors = new HashSet<TrackedObject>();
+		foreach ( var obj in objects )
+		{
+			if ( obj.PreviousElement != null )
+				predecessors.Add( obj.PreviousElement );
+		}
+
+		for ( var i = 0; i < objects.Count; i++ )
+		{
+			var obj = objects[i];
+			var next = obj.NextElement;
+			if ( next?.ChildNode == null || next.PreviousElement != obj ||
+				next.Parent != obj.Parent || next.ContainerProperty != obj.ContainerProperty )
+				continue;
+
+			// Explicit insertions/moves take precedence over an unchanged source link.
+			if ( predecessors.Add( obj ) )
+				objects.Add( next );
 		}
 	}
 
