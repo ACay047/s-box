@@ -19,7 +19,6 @@ class FilenameFilter:
     def __init__(self, config: Dict[str, object]) -> None:
         self._include_globs = tuple(_normalise_glob(p) for p in config.get("include_globs", []) or [])
         self._exclude_globs = tuple(_normalise_glob(p) for p in config.get("exclude_globs", []) or [])
-        self._whitelisted_shaders = tuple(_normalise_glob(p) for p in config.get("whitelisted_shaders", []) or [])
 
         renames = config.get("path_renames", {}) or {}
         self._rename_targets: Dict[str, str] = {
@@ -36,9 +35,6 @@ class FilenameFilter:
 
         if allowed and _matches_any_glob(path, self._exclude_globs):
             allowed = False
-
-        if not allowed and _matches_any_glob(path, self._whitelisted_shaders):
-            allowed = True
 
         if not allowed:
             return None
