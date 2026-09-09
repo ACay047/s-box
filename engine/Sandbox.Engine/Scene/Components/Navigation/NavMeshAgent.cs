@@ -167,6 +167,7 @@ public sealed class NavMeshAgent : Component
 	public void SetAgentPosition( Vector3 position ) => agentInternal?.SetPosition( NavMesh.ToNav( position ) );
 	public void MoveTo( Vector3 targetPosition ) => agentInternal?.MoveTo( NavMesh.ToNav( targetPosition ) );
 	public void Stop() => agentInternal?.Stop();
+	/// <summary>Ends custom link traversal at the current AgentPosition and resumes navigation.</summary>
 	public void CompleteLinkTraversal() => agentInternal?.CompleteLink();
 
 	/// <summary>Assigns a path calculated on this navmesh. The start must project onto the path's first polygon.</summary>

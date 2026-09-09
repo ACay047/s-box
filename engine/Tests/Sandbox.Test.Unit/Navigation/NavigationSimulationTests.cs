@@ -106,6 +106,7 @@ public class NavigationSimulationTests
 			var position = agent.Position;
 			simulation.Update( 0.1f );
 			Assert.AreEqual( position, agent.Position );
+			agent.SetPosition( agent.State.Link.Value.End );
 			agent.CompleteLink();
 		}
 		Assert.IsTrue( entered, "Wall steering must not prevent link entry" );
@@ -378,10 +379,69 @@ public class NavigationSimulationTests
 		for ( int i = 0; i < 300; i++ ) simulation.Update( 0.02f );
 		Assert.IsTrue( agent.State.Link.HasValue );
 		Assert.AreEqual( 1f, agent.State.Position.y, 0.01f );
+		agent.SetPosition( agent.State.Link.Value.End );
 		agent.CompleteLink();
 		for ( int i = 0; i < 300; i++ ) simulation.Update( 0.02f );
 		Assert.IsFalse( agent.State.Link.HasValue );
 		Assert.IsTrue( agent.State.Position.Distance( new Vector3( 500, 201, 320 ) ) < 1 );
+	}
+
+	[TestMethod]
+	[DataRow( 120, true )]
+	[DataRow( -120, true )]
+	[DataRow( 120, false )]
+	[DataRow( -120, false )]
+	public void ManualLinkResumesFromActualLanding( int offset, bool ascending )
+	{
+		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true, obstacles: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		float startHeight = ascending ? 1 : 201, endHeight = ascending ? 201 : 1;
+		var agent = simulation.Add( new Vector3( 320, startHeight, 320 ), Settings( mesh, false ) );
+		var target = new Vector3( 500, endHeight, 320 );
+		agent.MoveTo( target );
+		for ( int i = 0; i < 500 && !agent.State.Link.HasValue; i++ ) simulation.Update( 0.02f );
+		Assert.IsTrue( agent.State.Link.HasValue );
+		long exitPolygon = agent.Path[0];
+		var landing = agent.State.Link.Value.End + new Vector3( offset, 0, 0 );
+		agent.Query.FindNearestPoly( landing, new Vector3( 8 ), TraversalFilter.Unrestricted, out var landingPolygon, out _, out _ );
+		Assert.AreNotEqual( 0L, landingPolygon );
+		Assert.AreNotEqual( exitPolygon, landingPolygon, "Exercise a landing outside the original exit polygon" );
+		agent.SetPosition( landing );
+		agent.CompleteLink();
+		Assert.AreEqual( landing, agent.State.Position, "Custom traversal must not snap back to the link endpoint" );
+		Assert.IsNull( agent.State.Link );
+		Assert.AreEqual( (Vector3?)target, agent.State.Target );
+		agent.CompleteLink();
+		Assert.AreEqual( landing, agent.State.Position, "Completing twice must be harmless" );
+		simulation.Update( 0.02f );
+		Assert.IsTrue( agent.State.Position.Distance( landing ) < 1, "The first walking update must start from the landing polygon" );
+		Assert.IsTrue( agent.State.Navigating );
+		for ( int i = 0; i < 2000; i++ ) simulation.Update( 0.02f );
+		Assert.IsNull( agent.State.Link );
+		Assert.IsNull( agent.State.Target );
+		Assert.IsTrue( agent.State.Position.Distance( target ) < 1, agent.State.ToString() );
+	}
+
+	[TestMethod]
+	public void ManualLinkCompletedOffMeshWaitsForPlacement()
+	{
+		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var agent = simulation.Add( new Vector3( 320, 1, 320 ), Settings( mesh, false ) );
+		var target = new Vector3( 500, 201, 320 );
+		agent.MoveTo( target );
+		simulation.Update( 0.02f );
+		Assert.IsTrue( agent.State.Link.HasValue );
+		var outside = new Vector3( 800, 201, 320 );
+		agent.SetPosition( outside );
+		agent.CompleteLink();
+		for ( int i = 0; i < 10; i++ ) simulation.Update( 0.02f );
+		Assert.AreEqual( outside, agent.State.Position );
+		Assert.AreEqual( (Vector3?)target, agent.State.Target );
+		Assert.IsFalse( agent.State.Navigating );
+		agent.SetPosition( new Vector3( 600, 201, 320 ) );
+		for ( int i = 0; i < 300; i++ ) simulation.Update( 0.02f );
+		Assert.IsTrue( agent.State.Position.Distance( target ) < 1 );
 	}
 
 	[TestMethod]

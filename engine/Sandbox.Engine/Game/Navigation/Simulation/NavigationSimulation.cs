@@ -183,7 +183,11 @@ internal sealed class NavigationSimulation
 			{
 				var offset = link.End - agent.Position;
 				float distance = offset.Length;
-				if ( distance <= settings.MaxSpeed * dt ) agent.CompleteLinkCore();
+				if ( distance <= settings.MaxSpeed * dt )
+				{
+					agent.Position = link.End;
+					agent.CompleteLinkCore();
+				}
 				else agent.Position += offset / distance * settings.MaxSpeed * dt;
 			}
 			return;
@@ -466,13 +470,22 @@ internal sealed class SimulationAgent
 
 	internal void CompleteLink()
 	{
-		lock ( Owner.Gate ) CompleteLinkCore();
+		lock ( Owner.Gate )
+		{
+			if ( Link is null ) return;
+			CompleteLinkCore();
+			// Custom traversal can land outside the exit polygon. Place and replan
+			// from the supplied position on the next update.
+			Path.Clear();
+			CornerCount = 0;
+			HasRoute = false;
+			NeedsPath = Target.HasValue;
+		}
 	}
 
 	internal void CompleteLinkCore()
 	{
-		if ( Link is not SimulationLink link ) return;
-		Position = link.End;
+		if ( Link is null ) return;
 		WallRevision = -1;
 		Link = null;
 		Velocity = WishVelocity = default;

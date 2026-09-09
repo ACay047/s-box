@@ -8,6 +8,58 @@ namespace NavigationTests;
 public class NavMeshRegressions
 {
 	[TestMethod]
+	[DataRow( false )]
+	[DataRow( true )]
+	public async Task CustomLinkCompletionKeepsTheSuppliedAgentPosition( bool handBackPositionControl )
+	{
+		var scene = new Scene();
+		using var scope = scene.Push();
+		Floor( scene, Vector3.Zero );
+		Floor( scene, new Vector3( 0, 0, 200 ) );
+		var link = scene.CreateObject().Components.Create<NavMeshLink>( false );
+		link.LocalStartPosition = Vector3.Zero;
+		link.LocalEndPosition = new Vector3( 0, 0, 200 );
+		link.Enabled = true;
+		scene.NavMesh.CustomBounds = true;
+		scene.NavMesh.Bounds = BBox.FromPositionAndSize( new Vector3( 0, 0, 100 ), new Vector3( 800, 800, 400 ) );
+		scene.NavMesh.UpdateCache( scene.PhysicsWorld );
+		Assert.IsTrue( await scene.NavMesh.Generate( scene.PhysicsWorld ) );
+		var go = scene.CreateObject();
+		var agent = go.Components.Create<NavMeshAgent>();
+		agent.AutoTraverseLinks = false;
+		agent.UpdatePosition = false;
+		int entries = 0, exits = 0;
+		agent.LinkEnter = () => entries++;
+		agent.LinkExit = () => exits++;
+		agent.MoveTo( new Vector3( 150, 0, 200 ) );
+		for ( int i = 0; i < 100 && !agent.IsTraversingLink; i++ ) scene.GameTick();
+		Assert.IsTrue( agent.IsTraversingLink );
+		var landing = agent.CurrentLinkTraversal.Value.LinkExitPosition + new Vector3( 80, 0, 0 );
+		go.WorldPosition = handBackPositionControl ? landing : landing + new Vector3( 0, 25, 0 );
+		var bodyPosition = go.WorldPosition;
+		agent.SetAgentPosition( landing );
+		agent.UpdatePosition = handBackPositionControl;
+		agent.CompleteLinkTraversal();
+		Assert.AreEqual( landing, agent.AgentPosition );
+		Assert.AreEqual( bodyPosition, go.WorldPosition );
+		scene.GameTick();
+		Assert.IsTrue( agent.AgentPosition.x >= landing.x, "Resuming walking must not pull the agent back to the endpoint" );
+		Assert.IsFalse( agent.IsTraversingLink );
+		Assert.AreEqual( 1, entries );
+		Assert.AreEqual( 1, exits );
+		for ( int i = 0; i < 100; i++ )
+		{
+			scene.GameTick();
+			Assert.IsTrue( go.WorldPosition.x >= landing.x, "Handing position control back must not pull the body to the endpoint" );
+		}
+		Assert.IsTrue( agent.AgentPosition.x > 145 );
+		if ( handBackPositionControl ) Assert.IsTrue( go.WorldPosition.x > 145 );
+		else Assert.AreEqual( bodyPosition, go.WorldPosition );
+		Assert.AreEqual( 1, entries );
+		Assert.AreEqual( 1, exits );
+	}
+
+	[TestMethod]
 	public async Task PendingRetargetKeepsTheActivePathSnapshotConsistent()
 	{
 		var scene = new Scene();
