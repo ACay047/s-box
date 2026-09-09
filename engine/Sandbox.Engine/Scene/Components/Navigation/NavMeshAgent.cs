@@ -186,10 +186,13 @@ public sealed class NavMeshAgent : Component
 			agent.Position = position;
 			agent.Path.Clear();
 			agent.Path.AddRange( path.Polygons );
-			agent.Target = NavMesh.ToNav( path.RequestedTarget );
+			agent.PathRequestedTarget = NavMesh.ToNav( path.RequestedTarget );
+			agent.Target = agent.PathRequestedTarget;
 			agent.PathTarget = NavMesh.ToNav( path.Points[^1].Position );
 			agent.Partial = path.Status == NavMeshPathStatus.Partial;
 			agent.NeedsPath = false;
+			agent.HasRoute = true;
+			agent.RestingPosition = null;
 			agent.Link = null;
 			agent.PathRevision = agent.Owner.Revision;
 		}
@@ -203,7 +206,7 @@ public sealed class NavMeshAgent : Component
 		{
 			if ( !agent.State.Navigating ) return new() { Status = NavMeshPathStatus.PathNotFound };
 			return Scene.NavMesh.CreatePathResult( agent.Query, agent.Position, agent.PathTarget,
-				agent.Path, agent.Partial, NavMesh.FromNav( agent.Target.Value ) );
+				agent.Path, agent.Partial, NavMesh.FromNav( agent.PathRequestedTarget ) );
 		}
 	}
 
@@ -236,7 +239,8 @@ public sealed class NavMeshAgent : Component
 		lock ( agentInternal.Owner.Gate )
 		{
 			agentInternal.Options = CreateAgentSettings();
-			agentInternal.NeedsPath = agentInternal.Target.HasValue;
+			agentInternal.WallRevision = -1;
+			agentInternal.NeedsPath = (agentInternal.Target ?? agentInternal.RestingPosition).HasValue;
 		}
 	}
 

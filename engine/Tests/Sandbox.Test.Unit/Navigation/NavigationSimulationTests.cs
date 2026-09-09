@@ -9,6 +9,232 @@ namespace NavigationTests;
 public class NavigationSimulationTests
 {
 	[TestMethod]
+	public void ExternallyDrivenAgentKeepsItsReportedVelocity()
+	{
+		var mesh = SyntheticNavMesh.Create();
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var position = new Vector3( 100, 1, 100 );
+		var agent = simulation.Add( position, Settings( mesh ) with { MaxSpeed = 0 } );
+		agent.Velocity = new Vector3( 20, 0, 0 );
+		simulation.Update( 0.02f );
+		Assert.AreEqual( position, agent.State.Position );
+		Assert.AreEqual( new Vector3( 20, 0, 0 ), agent.State.Velocity );
+		agent.Stop();
+		Assert.AreEqual( Vector3.Zero, agent.State.Velocity );
+	}
+
+	[TestMethod]
+	public void AvoidingANeighbourDoesNotDriveTheAgentIntoAWall_11811()
+	{
+		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var agent = simulation.Add( new Vector3( 294, 1, 100 ), Settings( mesh ) );
+		var neighbour = simulation.Add( new Vector3( 280, 1, 100 ), Settings( mesh ) );
+		agent.MoveTo( new Vector3( 294, 1, 250 ) );
+		neighbour.MoveTo( new Vector3( 280, 1, 230 ) );
+		float clearance = 6;
+		for ( int tick = 0; tick < 500; tick++ )
+		{
+			simulation.Update( 0.02f );
+			clearance = MathF.Min( clearance, 300 - agent.Position.x );
+		}
+		Assert.IsTrue( clearance >= 1, $"Steering drove the agent against the wall: clearance {clearance}" );
+		Assert.IsTrue( agent.Position.Distance( new Vector3( 294, 1, 250 ) ) < 2, agent.State.ToString() );
+		Assert.IsTrue( neighbour.Position.Distance( new Vector3( 280, 1, 230 ) ) < 2, neighbour.State.ToString() );
+		Assert.IsNull( agent.State.Target, "Nearby agents must not prevent arrival from being reported" );
+		Assert.IsNull( neighbour.State.Target );
+	}
+
+	[TestMethod]
+	public void WallQueryKeepsPartialTilePortalsOpen()
+	{
+		var mesh = SyntheticNavMesh.Create( tileBorders: true );
+		var neighbour = SyntheticNavMesh.Create( minZ: 32, tileBorders: true ).GetTile( 0 ).data;
+		neighbour.header.x = 1;
+		neighbour.header.bmin.x += 640;
+		neighbour.header.bmax.x += 640;
+		for ( int i = 0; i < neighbour.verts.Length; i++ ) neighbour.verts[i].x += 640;
+		Assert.IsTrue( mesh.AddTile( neighbour, 0, 0, out _ ).Succeeded() );
+		var query = new MeshQuery( mesh );
+		Span<MeshQuery.BoundarySegment> walls = stackalloc MeshQuery.BoundarySegment[16];
+		foreach ( float z in new[] { 280f, 400f } )
+		{
+			var position = new Vector3( 630, 1, z );
+			query.FindNearestPoly( position, new Vector3( 8 ), TraversalFilter.Unrestricted, out var poly, out _, out _ );
+			int count = query.FindLocalWalls( poly, position, 64, 32, TraversalFilter.Unrestricted, walls );
+			bool borderWall = false;
+			foreach ( var wall in walls[..count] )
+			{
+				if ( MathF.Abs( wall.Start.x - 640 ) > 0.01f || MathF.Abs( wall.End.x - 640 ) > 0.01f ) continue;
+				borderWall = true;
+				Assert.IsTrue( MathF.Max( wall.Start.z, wall.End.z ) <= 321, "The open part of a tile portal must not be treated as a wall" );
+			}
+			Assert.AreEqual( z < 320, borderWall );
+		}
+		for ( int i = 0; i < neighbour.polys.Length; i++ ) neighbour.polys[i].area = 2;
+		var filter = new TraversalFilter( uint.MaxValue & ~(1u << 2), null );
+		var blockedPosition = new Vector3( 630, 1, 400 );
+		query.FindNearestPoly( blockedPosition, new Vector3( 8 ), filter, out var start, out _, out _ );
+		Assert.AreNotEqual( 0L, start, "The starting tile must remain traversable" );
+		int blockedCount = query.FindLocalWalls( start, blockedPosition, 64, 32, filter, walls );
+		Assert.IsTrue( blockedCount > 0, "A portal into an excluded area must become a steering boundary" );
+		Assert.AreEqual( 640f, walls[0].Start.x, 0.01f );
+		Assert.AreEqual( 640f, walls[0].End.x, 0.01f );
+	}
+
+	[TestMethod]
+	[DataRow( true )]
+	[DataRow( false )]
+	public void WallAdjacentLinkEntrancesRemainReachable_10146( bool automatic )
+	{
+		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var data = mesh.GetTile( 0 ).data;
+		data.offMeshCons[0].startPos.x = 639.9f;
+		data.offMeshCons[0].endPos.x = 639.9f;
+		Assert.IsTrue( mesh.UpdateTile( data, 0 ).Succeeded() );
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var agent = simulation.Add( new Vector3( 100, 1, 320 ), Settings( mesh, automatic ) );
+		var target = new Vector3( 100, 201, 320 );
+		agent.MoveTo( target );
+		bool entered = false;
+		for ( int tick = 0; tick < 1600; tick++ )
+		{
+			simulation.Update( 0.02f );
+			if ( !agent.State.Link.HasValue ) continue;
+			entered = true;
+			if ( automatic ) continue;
+			var position = agent.Position;
+			simulation.Update( 0.1f );
+			Assert.AreEqual( position, agent.Position );
+			agent.CompleteLink();
+		}
+		Assert.IsTrue( entered, "Wall steering must not prevent link entry" );
+		Assert.IsTrue( agent.Position.Distance( target ) < 1, agent.State.ToString() );
+	}
+
+	[TestMethod]
+	[DataRow( 1, false )]
+	[DataRow( 8, false )]
+	[DataRow( 32, false )]
+	[DataRow( 64, false )]
+	[DataRow( 8, true )]
+	[DataRow( 32, true )]
+	[DataRow( 64, true )]
+	public void AgentsReachTargetsThroughDoorway_11811( int count, bool opposing )
+	{
+		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var agents = new List<SimulationAgent>();
+		var targets = new List<Vector3>();
+		for ( int i = 0; i < count; i++ )
+		{
+			bool reverse = opposing && i % 2 == 1;
+			int slot = opposing ? i / 2 : i;
+			float x = 60 + slot % 8 * 25, z = 100 + slot / 8 * 25;
+			var target = new Vector3( reverse ? x : 640 - x, 1, z );
+			var agent = simulation.Add( new Vector3( reverse ? 640 - x : x, 1, z ), Settings( mesh ) );
+			agent.MoveTo( target );
+			agents.Add( agent );
+			targets.Add( target );
+		}
+		for ( int tick = 0; tick < 2250; tick++ )
+		{
+			simulation.Update( 0.02f );
+			foreach ( var agent in agents )
+				if ( agent.State.Target.HasValue ) Assert.IsTrue( agent.State.Navigating, "Corridor repair must not publish a lost route" );
+		}
+		for ( int i = 0; i < agents.Count; i++ )
+			Assert.IsTrue( agents[i].Position.Distance( targets[i] ) < 8, $"Agent {i} stalled: {agents[i].State}" );
+	}
+
+	[TestMethod]
+	public void RetargetingKeepsTheActiveRoute_11811()
+	{
+		var mesh = SyntheticNavMesh.Create();
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var agent = simulation.Add( new Vector3( 100, 1, 100 ), Settings( mesh ) );
+		agent.MoveTo( new Vector3( 500, 1, 100 ) );
+		Assert.IsFalse( agent.State.Navigating, "An initial request has no route yet" );
+		for ( int tick = 0; tick < 100; tick++ )
+		{
+			simulation.Update( 0.02f );
+			agent.MoveTo( new Vector3( 500, 1, 100 + tick * 2 ) );
+			Assert.IsTrue( agent.State.Navigating, "Requesting an updated route must not drop the active route" );
+		}
+		agent.MoveTo( new Vector3( 10000, 1, 10000 ) );
+		simulation.Update( 0.02f );
+		Assert.IsFalse( agent.State.Navigating, "An unplaceable destination must not report a valid route" );
+	}
+
+	[TestMethod]
+	public void ArrivedAgentsYieldAndSettleBackAtTheirDestination()
+	{
+		var mesh = SyntheticNavMesh.Create();
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var goal = new Vector3( 200, 1, 320 );
+		var resting = simulation.Add( new Vector3( 100, 1, 320 ), Settings( mesh ) );
+		resting.MoveTo( goal );
+		for ( int tick = 0; tick < 300; tick++ ) simulation.Update( 0.02f );
+		Assert.IsNull( resting.State.Target );
+		var passing = simulation.Add( resting.Position, Settings( mesh ) );
+		passing.MoveTo( new Vector3( 500, 1, 320 ) );
+		float displaced = 0;
+		for ( int tick = 0; tick < 500; tick++ )
+		{
+			simulation.Update( 0.02f );
+			displaced = MathF.Max( displaced, resting.Position.Distance( goal ) );
+			Assert.IsFalse( resting.State.Navigating );
+			Assert.IsNull( resting.State.Target );
+		}
+		Assert.IsTrue( displaced > 2, "The arrived agent must yield to an overlapping neighbour" );
+		Assert.IsTrue( resting.Position.Distance( goal ) <= 2 );
+		Assert.IsTrue( passing.Position.Distance( new Vector3( 500, 1, 320 ) ) < 1 );
+	}
+
+	[TestMethod]
+	public void OverlappingSpawnsReachTheirTargets_11811()
+	{
+		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var agents = new List<SimulationAgent>();
+		for ( int i = 0; i < 16; i++ )
+		{
+			var agent = simulation.Add( new Vector3( 100, 1, 320 ), Settings( mesh ) );
+			agent.MoveTo( new Vector3( 450 + i % 4 * 35, 1, 250 + i / 4 * 35 ) );
+			agents.Add( agent );
+		}
+		for ( int tick = 0; tick < 2250; tick++ ) simulation.Update( 0.02f );
+		for ( int i = 0; i < agents.Count; i++ )
+			Assert.IsTrue( agents[i].Position.Distance( new Vector3( 450 + i % 4 * 35, 1, 250 + i / 4 * 35 ) ) < 8, $"Agent {i} stalled: {agents[i].State}" );
+	}
+
+	[TestMethod]
+	[DataRow( 0f )]
+	[DataRow( 0.1f )]
+	public void AgentReachesWallAdjacentTargets( float clearance )
+	{
+		var mesh = SyntheticNavMesh.Create( obstacles: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var agent = simulation.Add( new Vector3( 100, 1, 100 ), Settings( mesh ) );
+		var target = new Vector3( 180 - clearance, 1, 500 );
+		agent.MoveTo( target );
+		for ( int tick = 0; tick < 2000; tick++ ) simulation.Update( 0.02f );
+		Assert.IsTrue( agent.Position.Distance( target ) < 1, agent.State.ToString() );
+	}
+
+	[TestMethod]
+	public void SpawnedAgentNavigatesAroundObstacles_11811()
+	{
+		var mesh = SyntheticNavMesh.Create( obstacles: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
+		var agent = simulation.Add( new Vector3( 100, 1, 100 ), Settings( mesh ) );
+		var target = new Vector3( 500, 1, 500 );
+		agent.MoveTo( target );
+		for ( int tick = 0; tick < 2000; tick++ ) simulation.Update( 0.02f );
+		Assert.IsTrue( agent.Position.Distance( target ) < 2, $"Agent stalled: {agent.State}" );
+	}
+
+	[TestMethod]
 	public void SpanConnectivityAndSearchQueueMatchReference() => NavigationAlgorithmChecks.Run();
 
 	[TestMethod]
@@ -28,12 +254,18 @@ public class NavigationSimulationTests
 		Assert.AreEqual( compact.BMax, copy.BMax, "Copying a cached field must not expand its bounds" );
 	}
 	[TestMethod]
-	public void WarmSerialSimulationDoesNotAllocate()
+	[DataRow( 1 )]
+	[DataRow( 32 )]
+	public void WarmSerialSimulationDoesNotAllocate( int count )
 	{
 		var mesh = SyntheticNavMesh.Create();
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
-		var agent = simulation.Add( new Vector3( 100, 1, 100 ), Settings( mesh ) );
-		agent.MoveTo( new Vector3( 500, 1, 100 ) );
+		SimulationAgent agent = null;
+		for ( int i = 0; i < count; i++ )
+		{
+			agent = simulation.Add( new Vector3( 100 + i % 8 * 24, 1, 100 + i / 8 * 24 ), Settings( mesh ) );
+			agent.MoveTo( new Vector3( 500, 1, 100 + i / 8 * 24 ) );
+		}
 		for ( int i = 0; i < 32; i++ ) simulation.Update( 0.001f );
 		long before = GC.GetAllocatedBytesForCurrentThread();
 		for ( int i = 0; i < 128; i++ ) simulation.Update( 0.001f );

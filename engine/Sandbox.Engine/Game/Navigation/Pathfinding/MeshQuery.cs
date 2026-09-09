@@ -43,6 +43,78 @@ internal class MeshQuery
 	// Reused by QueryPolygons
 	private readonly MeshTile[] _tileScratch = new MeshTile[32];
 
+	internal readonly record struct BoundarySegment( Vector3 Start, Vector3 End, float DistanceSquared );
+
+	/// <summary>Collects the nearest solid edges on the locally connected surface, including closed parts of tile portals.</summary>
+	internal int FindLocalWalls( long start, Vector3 position, float range, float height, TraversalFilter filter, Span<BoundarySegment> walls )
+	{
+		if ( !IsValidPolyRef( start, filter ) || walls.IsEmpty ) return 0;
+		_nodePool.Clear();
+		_bfsStack.Clear();
+		var first = _nodePool.GetNode( start );
+		first.flags = NodeFlags.NODE_CLOSED;
+		_bfsStack.Add( first );
+		int count = 0;
+		float rangeSquared = range * range;
+		for ( int head = 0; head < _bfsStack.Count; head++ )
+		{
+			_nav.GetTileAndPolyByRefUnsafe( _bfsStack[head].id, out var tile, out var poly );
+			for ( int edge = 0; edge < poly.vertCount; edge++ )
+			{
+				var a = tile.data.verts[poly.verts[edge]];
+				var b = tile.data.verts[poly.verts[(edge + 1) % poly.vertCount]];
+				if ( Geometry.DistancePtSegSqr2D( position, a, b, out _ ) > rangeSquared ) continue;
+				bool open = false;
+				for ( int i = poly.firstLink; i != NULL_LINK; i = tile.links[i].next )
+				{
+					var link = tile.links[i];
+					if ( link.edge != edge || !IsGroundPortal( link.refs, filter ) ) continue;
+					var portalA = link.side == 0xff ? a : Vector3.Lerp( a, b, link.bmin / 255f );
+					var portalB = link.side == 0xff ? b : Vector3.Lerp( a, b, link.bmax / 255f );
+					open |= link.side == 0xff;
+					if ( Geometry.DistancePtSegSqr2D( position, portalA, portalB, out _ ) > rangeSquared ) continue;
+					var neighbour = _nodePool.GetNode( link.refs );
+					if ( (neighbour.flags & NodeFlags.NODE_CLOSED) != 0 ) continue;
+					neighbour.flags = NodeFlags.NODE_CLOSED;
+					_bfsStack.Add( neighbour );
+				}
+				if ( open ) continue;
+				// Sweep the union of traversable portal intervals. Gaps remain walls.
+				int cursor = 0;
+				while ( cursor < 255 )
+				{
+					int covered = cursor, next = 255;
+					for ( int i = poly.firstLink; i != NULL_LINK; i = tile.links[i].next )
+					{
+						var link = tile.links[i];
+						if ( link.edge != edge || !IsGroundPortal( link.refs, filter ) ) continue;
+						if ( link.bmin <= cursor ) covered = Math.Max( covered, link.bmax );
+						else next = Math.Min( next, link.bmin );
+					}
+					if ( covered > cursor ) { cursor = covered; continue; }
+					AddLocalWall( Vector3.Lerp( a, b, cursor / 255f ), Vector3.Lerp( a, b, next / 255f ), position, rangeSquared, height, walls, ref count );
+					cursor = next;
+				}
+			}
+		}
+		return count;
+	}
+
+	private bool IsGroundPortal( long reference, TraversalFilter filter )
+		=> _nav.GetTileAndPolyByRef( reference, out _, out var poly ).Succeeded() && poly.type == PolyTypes.POLYTYPE_GROUND && filter.Allows( poly.area );
+
+	private static void AddLocalWall( Vector3 a, Vector3 b, Vector3 position, float rangeSquared, float height, Span<BoundarySegment> walls, ref int count )
+	{
+		float distance = Geometry.DistancePtSegSqr2D( position, a, b, out float t );
+		if ( distance > rangeSquared || MathF.Abs( Vector3.Lerp( a, b, t ).y - position.y ) > height ) return;
+		int slot = count;
+		while ( slot > 0 && distance < walls[slot - 1].DistanceSquared ) slot--;
+		if ( slot >= walls.Length ) return;
+		count = Math.Min( count + 1, walls.Length );
+		for ( int i = count - 1; i > slot; i-- ) walls[i] = walls[i - 1];
+		walls[slot] = new( a, b, distance );
+	}
+
 	internal Status BeginPathSearch( long start, long end, Vector3 startPosition, Vector3 endPosition, TraversalFilter filter )
 		=> (search ??= new PathSearch( _nav, this )).Begin( start, end, startPosition, endPosition, filter );
 	internal Status AdvancePathSearch( int iterations ) => search.Advance( iterations );

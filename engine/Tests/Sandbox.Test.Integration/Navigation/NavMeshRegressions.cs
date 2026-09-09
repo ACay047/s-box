@@ -8,6 +8,29 @@ namespace NavigationTests;
 public class NavMeshRegressions
 {
 	[TestMethod]
+	public async Task PendingRetargetKeepsTheActivePathSnapshotConsistent()
+	{
+		var scene = new Scene();
+		using var scope = scene.Push();
+		Floor( scene, Vector3.Zero );
+		await scene.NavMesh.Generate( scene.PhysicsWorld );
+		var go = scene.CreateObject();
+		go.WorldPosition = new Vector3( -100, 0, 0 );
+		var agent = go.Components.Create<NavMeshAgent>();
+		var firstTarget = new Vector3( 100, 0, 0 );
+		agent.MoveTo( firstTarget );
+		scene.GameTick();
+		var active = agent.GetPath();
+		agent.MoveTo( new Vector3( 0, 100, 0 ) );
+		var pending = agent.GetPath();
+		Assert.IsTrue( pending.IsValid );
+		Assert.AreEqual( firstTarget, pending.RequestedTarget );
+		Assert.AreEqual( active.Points[^1].Position, pending.Points[^1].Position );
+		agent.SetPath( pending );
+		Assert.AreEqual( (Vector3?)firstTarget, agent.TargetPosition );
+	}
+
+	[TestMethod]
 	[DataRow( false, false )]
 	[DataRow( true, false )]
 	[DataRow( false, true )]

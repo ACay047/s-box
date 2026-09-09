@@ -7,16 +7,17 @@ namespace NavigationTests;
 
 internal static class SyntheticNavMesh
 {
-	internal static NavMeshGraph Create( bool upperFloor = false, bool link = false, bool obstacles = false, bool rasterized = false )
+	internal static NavMeshGraph Create( bool upperFloor = false, bool link = false, bool obstacles = false, bool rasterized = false, bool doorway = false, int minZ = 0, bool tileBorders = false )
 	{
 		using var field = new Heightfield( 64, 64, Vector3.Zero, new Vector3( 640, 512, 640 ), 10, 1 );
 		var vertices = new List<Vector3>();
 		var indices = new List<int>();
 		var areas = new List<int>();
-		for ( int z = 0; z < 64; z++ )
+		for ( int z = minZ; z < 64; z++ )
 			for ( int x = 0; x < 64; x++ )
 			{
 				if ( obstacles && x % 12 == 6 && z > 8 && z < 56 ) continue;
+				if ( doorway && x >= 30 && x < 34 && (z < 28 || z >= 36) ) continue;
 				if ( rasterized )
 				{
 					int start = vertices.Count;
@@ -53,6 +54,19 @@ internal static class SyntheticNavMesh
 			offMeshConCount = link ? 1 : 0
 		};
 		var data = MeshBuilder.CreateNavMeshData( parameters );
+		if ( tileBorders )
+			for ( int i = 0; i < data.polys.Length; i++ )
+				for ( int edge = 0; edge < data.polys[i].vertCount; edge++ )
+				{
+					ref var poly = ref data.polys[i];
+					var a = data.verts[poly.verts[edge]];
+					var b = data.verts[poly.verts[(edge + 1) % poly.vertCount]];
+					int side = a.x == 0 && b.x == 0 ? 4 : a.x == 640 && b.x == 640 ? 0
+						: a.z == 0 && b.z == 0 ? 6 : a.z == 640 && b.z == 640 ? 2 : -1;
+					if ( side < 0 ) continue;
+					poly.neis[edge] = MeshConstants.EXT_LINK | side;
+					data.header.maxLinkCount += 2;
+				}
 		var mesh = new NavMeshGraph();
 		mesh.Init( new MeshParameters { orig = Vector3.Zero, tileWidth = 640, tileHeight = 640, maxTiles = 4 }, 6 );
 		mesh.AddTile( data, 0, 0, out _ );
