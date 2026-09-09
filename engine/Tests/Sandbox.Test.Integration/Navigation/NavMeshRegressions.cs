@@ -8,6 +8,108 @@ namespace NavigationTests;
 public class NavMeshRegressions
 {
 	[TestMethod]
+	[DataRow( false, false )]
+	[DataRow( true, false )]
+	[DataRow( false, true )]
+	[DataRow( true, true )]
+	public async Task RuntimeParentTransformsKeepTheAgentPath_11811( bool updatePosition, bool updateRotation )
+	{
+		var scene = new Scene();
+		using var scope = scene.Push();
+		Floor( scene, Vector3.Zero );
+		await scene.NavMesh.Generate( scene.PhysicsWorld );
+		var parent = scene.CreateObject();
+		var go = scene.CreateObject();
+		go.Parent = parent;
+		go.WorldPosition = new Vector3( -100, 0, 0 );
+		var agent = go.Components.Create<NavMeshAgent>();
+		agent.UpdatePosition = updatePosition;
+		agent.UpdateRotation = updateRotation;
+		agent.MoveTo( new Vector3( 100, 0, 0 ) );
+		scene.GameTick();
+		var position = agent.AgentPosition;
+		var path = agent.agentInternal.Path.ToArray();
+		parent.WorldPosition += new Vector3( 50, 100, 200 );
+		parent.WorldRotation = Rotation.FromYaw( 90 );
+		parent.WorldScale = new Vector3( 2 );
+		Assert.AreEqual( position, agent.AgentPosition );
+		Assert.IsTrue( agent.IsNavigating );
+		CollectionAssert.AreEqual( path, agent.agentInternal.Path.ToArray() );
+	}
+
+	[TestMethod]
+	public async Task EditorTransformsStillRepositionTheAgent()
+	{
+		var scene = Scene.CreateEditorScene();
+		using var scope = scene.Push();
+		Floor( scene, Vector3.Zero );
+		await scene.NavMesh.Generate( scene.PhysicsWorld );
+		var go = scene.CreateObject();
+		var agent = go.Components.Create<NavMeshAgent>();
+		go.WorldPosition = new Vector3( 80, 40, 0 );
+		Assert.AreEqual( go.WorldPosition, agent.AgentPosition );
+	}
+
+	[TestMethod]
+	public async Task RuntimeBodyTransformsAreIndependentOfSimulation_11811()
+	{
+		var scene = new Scene();
+		using var scope = scene.Push();
+		Floor( scene, Vector3.Zero );
+		await scene.NavMesh.Generate( scene.PhysicsWorld );
+		var go = scene.CreateObject();
+		go.WorldPosition = new Vector3( -100, 0, 0 );
+		var agent = go.Components.Create<NavMeshAgent>();
+		agent.UpdatePosition = agent.UpdateRotation = false;
+		agent.MoveTo( new Vector3( 100, 0, 0 ) );
+		scene.GameTick();
+		var position = agent.AgentPosition;
+		var path = agent.agentInternal.Path.ToArray();
+		go.WorldPosition = new Vector3( 0, 100, 500 );
+		go.WorldRotation = Rotation.FromYaw( 90 );
+		go.WorldScale = new Vector3( 2 );
+		Assert.AreEqual( position, agent.AgentPosition );
+		Assert.IsTrue( agent.IsNavigating );
+		CollectionAssert.AreEqual( path, agent.agentInternal.Path.ToArray() );
+		var body = go.WorldTransform;
+		for ( int tick = 0; tick < 80; tick++ ) scene.GameTick();
+		Assert.IsTrue( agent.AgentPosition.x > 90 );
+		Assert.AreEqual( body, go.WorldTransform );
+		var teleport = new Vector3( -80, 40, 0 );
+		agent.SetAgentPosition( teleport );
+		Assert.AreEqual( teleport, agent.AgentPosition );
+		Assert.AreEqual( body, go.WorldTransform );
+	}
+
+	[TestMethod]
+	public async Task RotatingAndScalingBodyKeepsAgentPath_11811()
+	{
+		var scene = new Scene();
+		using var scope = scene.Push();
+		Floor( scene, Vector3.Zero );
+		await scene.NavMesh.Generate( scene.PhysicsWorld );
+		var go = scene.CreateObject();
+		go.WorldPosition = new Vector3( -100, 0, 0 );
+		var agent = go.Components.Create<NavMeshAgent>();
+		agent.UpdateRotation = false;
+		agent.MoveTo( new Vector3( 100, 0, 0 ) );
+		for ( int tick = 0; tick < 80; tick++ )
+		{
+			scene.GameTick();
+			if ( agent.AgentPosition.x > 90 ) break;
+			Assert.IsTrue( agent.IsNavigating );
+			var position = agent.AgentPosition;
+			var path = agent.agentInternal.Path.ToArray();
+			go.WorldRotation = Rotation.FromYaw( tick * 31 );
+			go.WorldScale = new Vector3( tick % 2 == 0 ? 1.1f : 1 );
+			Assert.AreEqual( position, agent.AgentPosition, "Visual transform changes must not pull the simulated position backwards" );
+			Assert.IsTrue( agent.IsNavigating, "Rotation/scale changes must not drop the route" );
+			CollectionAssert.AreEqual( path, agent.agentInternal.Path.ToArray() );
+		}
+		Assert.IsTrue( agent.AgentPosition.x > 90, "Facing updates must not slow the agent's progress" );
+	}
+
+	[TestMethod]
 	public void CachedHeightfieldReadsSurviveConcurrentRetirement()
 	{
 		using var field = new Sandbox.Navigation.Generation.Heightfield( 8, 8, Vector3.Zero, new Vector3( 8, 64, 8 ), 1, 1 );
@@ -309,8 +411,9 @@ public class NavMeshRegressions
 		agent.MoveTo( new Vector3( 100, 0, 0 ) );
 		scene.GameTick();
 		Assert.IsTrue( agent.AgentPosition.z > 900 );
-		// An external controller/physics body lands the component on the floor.
+		// An external controller explicitly places the simulated agent after landing.
 		go.WorldPosition = new Vector3( -100, 0, 0 );
+		agent.SetAgentPosition( go.WorldPosition );
 		for ( int i = 0; i < 100; i++ ) scene.GameTick();
 		Assert.IsTrue( agent.AgentPosition.Distance( new Vector3( 100, 0, 4 ) ) < 10 );
 	}

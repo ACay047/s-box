@@ -163,6 +163,7 @@ public sealed class NavMeshAgent : Component
 		set { var agent = agentInternal; if ( agent is not null ) lock ( agent.Owner.Gate ) agent.Velocity = NavMesh.ToNav( value ); }
 	}
 
+	/// <summary>Explicitly repositions the simulated agent. Runtime GameObject transforms do not move it.</summary>
 	public void SetAgentPosition( Vector3 position ) => agentInternal?.SetPosition( NavMesh.ToNav( position ) );
 	public void MoveTo( Vector3 targetPosition ) => agentInternal?.MoveTo( NavMesh.ToNav( targetPosition ) );
 	public void Stop() => agentInternal?.Stop();
@@ -250,7 +251,8 @@ public sealed class NavMeshAgent : Component
 
 	private void OnTransformChanged()
 	{
-		if ( !applyingTransform ) SetAgentPosition( Transform.TargetWorld.Position );
+		if ( !applyingTransform && Scene.IsEditor && !Game.IsPlaying )
+			SetAgentPosition( Transform.TargetWorld.Position );
 	}
 
 	[Obsolete]
