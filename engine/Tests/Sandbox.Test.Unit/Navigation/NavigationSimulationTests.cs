@@ -9,6 +9,72 @@ namespace NavigationTests;
 public class NavigationSimulationTests
 {
 	[TestMethod]
+	public void WallSteeringDoesNotAvoidWallsBeyondTheDestination_11822()
+	{
+		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 16, 64 );
+		var agent = simulation.Add( new Vector3( 250, 1, 100 ), new( 16, 64, 180, 1200, 0.25f, true, TraversalFilter.Unrestricted ) );
+		agent.Query.FindNearestPoly( agent.Position, new Vector3( 8 ), TraversalFilter.Unrestricted, out var polygon, out _, out _ );
+		Assert.AreNotEqual( 0L, polygon );
+		agent.Path.Add( polygon );
+		var desired = new Vector3( 180, 0, 0 );
+		var goal = new Vector3( 280, 1, 100 );
+		Assert.AreEqual( desired, WallSteering.Steer( agent, desired, goal, agent.Position.Distance( goal ) ), "A wall beyond the destination must not divert a clear approach" );
+	}
+
+	[TestMethod]
+	public void WallSteeringDoesNotPredictPastTheNextRouteCorner_11822()
+	{
+		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 16, 64 );
+		var agent = simulation.Add( new Vector3( 280, 1, 270 ), new( 16, 64, 180, 1200, 0.25f, true, TraversalFilter.Unrestricted ) );
+		agent.Query.FindNearestPoly( agent.Position, new Vector3( 8 ), TraversalFilter.Unrestricted, out var polygon, out _, out _ );
+		Assert.AreNotEqual( 0L, polygon );
+		agent.Path.Add( polygon );
+		var corner = new Vector3( 300, 1, 280 );
+		var direction = corner - agent.Position;
+		var desired = direction.Normal * 180;
+		var result = WallSteering.Steer( agent, desired, new Vector3( 540, 1, 100 ), direction.Length );
+		Assert.IsTrue( result.Distance( desired ) < 0.01f, $"A clear approach to a route corner was diverted: {result} versus {desired}" );
+	}
+
+	[TestMethod]
+	[DataRow( 100, false )]
+	[DataRow( 540, false )]
+	[DataRow( 100, true )]
+	[DataRow( 540, true )]
+	public void RoomEntryFollowsTheRouteWithoutWideDetours_11822( int z, bool reverse )
+	{
+		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var simulation = new NavigationSimulation( mesh, new object(), 16, 64 );
+		var start = new Vector3( reverse ? 540 : 100, 1, z );
+		var target = new Vector3( reverse ? 100 : 540, 1, z );
+		var agent = simulation.Add( start, new( 16, 64, 180, 1200, 0.25f, true, TraversalFilter.Unrestricted ) );
+		agent.MoveTo( target );
+		simulation.Update( 0.02f );
+		var corners = new StraightPath[16];
+		Assert.IsTrue( agent.Query.FindStraightPath( start, target, agent.Path, agent.Path.Count, corners, out int count, corners.Length, 0 ).Succeeded() );
+		float shortest = 0;
+		for ( int i = 1; i < count; i++ ) shortest += corners[i].pos.Distance( corners[i - 1].pos );
+		float traveled = agent.Position.Distance( start ), deviation = 0;
+		int ticks = 1;
+		for ( int tick = 0; tick < 1000 && agent.State.Target.HasValue; tick++ )
+		{
+			var before = agent.Position;
+			simulation.Update( 0.02f );
+			ticks++;
+			traveled += before.Distance( agent.Position );
+			float nearest = float.MaxValue;
+			for ( int i = 1; i < count; i++ ) nearest = MathF.Min( nearest, Geometry.DistancePtSegSqr2D( agent.Position, corners[i - 1].pos, corners[i].pos, out _ ) );
+			deviation = MathF.Max( deviation, MathF.Sqrt( nearest ) );
+		}
+		Console.WriteLine( $"Room entry: length {traveled:F2}, shortest {shortest:F2}, deviation {deviation:F2}, seconds {ticks * 0.02f:F2}, arrived {!agent.State.Target.HasValue}" );
+		Assert.IsNull( agent.State.Target );
+		Assert.IsTrue( deviation <= agent.Options.Radius, $"An unobstructed agent took a wide detour: {deviation:F2}" );
+		Assert.IsTrue( traveled < shortest * 1.1f, $"Route length {traveled:F2} versus {shortest:F2}" );
+	}
+
+	[TestMethod]
 	public void ExternallyDrivenAgentKeepsItsReportedVelocity()
 	{
 		var mesh = SyntheticNavMesh.Create();
