@@ -11,7 +11,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void WallSteeringDoesNotAvoidWallsBeyondTheDestination_11822()
 	{
-		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var mesh = SyntheticNavMesh.Create( new() { Doorway = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 16, 64 );
 		var agent = simulation.Add( new Vector3( 250, 1, 100 ), new( 16, 64, 180, 1200, 0.25f, true, TraversalFilter.Unrestricted ) );
 		agent.Query.FindNearestPoly( agent.Position, new Vector3( 8 ), TraversalFilter.Unrestricted, out var polygon, out _, out _ );
@@ -25,7 +25,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void WallSteeringDoesNotPredictPastTheNextRouteCorner_11822()
 	{
-		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var mesh = SyntheticNavMesh.Create( new() { Doorway = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 16, 64 );
 		var agent = simulation.Add( new Vector3( 280, 1, 270 ), new( 16, 64, 180, 1200, 0.25f, true, TraversalFilter.Unrestricted ) );
 		agent.Query.FindNearestPoly( agent.Position, new Vector3( 8 ), TraversalFilter.Unrestricted, out var polygon, out _, out _ );
@@ -45,7 +45,7 @@ public class NavigationSimulationTests
 	[DataRow( 540, true )]
 	public void RoomEntryFollowsTheRouteWithoutWideDetours_11822( int z, bool reverse )
 	{
-		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var mesh = SyntheticNavMesh.Create( new() { Doorway = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 16, 64 );
 		var start = new Vector3( reverse ? 540 : 100, 1, z );
 		var target = new Vector3( reverse ? 100 : 540, 1, z );
@@ -92,7 +92,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void AvoidingANeighbourDoesNotDriveTheAgentIntoAWall_11811()
 	{
-		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var mesh = SyntheticNavMesh.Create( new() { Doorway = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 294, 1, 100 ), Settings( mesh ) );
 		var neighbour = simulation.Add( new Vector3( 280, 1, 100 ), Settings( mesh ) );
@@ -114,8 +114,8 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void WallQueryKeepsPartialTilePortalsOpen()
 	{
-		var mesh = SyntheticNavMesh.Create( tileBorders: true );
-		var neighbour = SyntheticNavMesh.Create( minZ: 32, tileBorders: true ).GetTile( 0 ).data;
+		var mesh = SyntheticNavMesh.Create( new() { TileBorders = true } );
+		var neighbour = SyntheticNavMesh.Create( new() { MinZ = 32, TileBorders = true } ).GetTile( 0 ).data;
 		neighbour.header.x = 1;
 		neighbour.header.bmin.x += 640;
 		neighbour.header.bmax.x += 640;
@@ -153,7 +153,7 @@ public class NavigationSimulationTests
 	[DataRow( false )]
 	public void WallAdjacentLinkEntrancesRemainReachable_10146( bool automatic )
 	{
-		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var mesh = SyntheticNavMesh.Create( new() { UpperFloor = true, Link = true } );
 		var data = mesh.GetTile( 0 ).data;
 		data.offMeshCons[0].startPos.x = 639.9f;
 		data.offMeshCons[0].endPos.x = 639.9f;
@@ -189,7 +189,7 @@ public class NavigationSimulationTests
 	[DataRow( 64, true )]
 	public void AgentsReachTargetsThroughDoorway_11811( int count, bool opposing )
 	{
-		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var mesh = SyntheticNavMesh.Create( new() { Doorway = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agents = new List<SimulationAgent>();
 		var targets = new List<Vector3>();
@@ -261,7 +261,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void OverlappingSpawnsReachTheirTargets_11811()
 	{
-		var mesh = SyntheticNavMesh.Create( doorway: true );
+		var mesh = SyntheticNavMesh.Create( new() { Doorway = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agents = new List<SimulationAgent>();
 		for ( int i = 0; i < 16; i++ )
@@ -280,7 +280,7 @@ public class NavigationSimulationTests
 	[DataRow( 0.1f )]
 	public void AgentReachesWallAdjacentTargets( float clearance )
 	{
-		var mesh = SyntheticNavMesh.Create( obstacles: true );
+		var mesh = SyntheticNavMesh.Create( new() { Obstacles = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 100, 1, 100 ), Settings( mesh ) );
 		var target = new Vector3( 180 - clearance, 1, 500 );
@@ -292,7 +292,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void SpawnedAgentNavigatesAroundObstacles_11811()
 	{
-		var mesh = SyntheticNavMesh.Create( obstacles: true );
+		var mesh = SyntheticNavMesh.Create( new() { Obstacles = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 100, 1, 100 ), Settings( mesh ) );
 		var target = new Vector3( 500, 1, 500 );
@@ -344,7 +344,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void PartialRouteResumesWhenAConnectionAppears()
 	{
-		var mesh = SyntheticNavMesh.Create( upperFloor: true );
+		var mesh = SyntheticNavMesh.Create( new() { UpperFloor = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 100, 1, 320 ), Settings( mesh ) );
 		var target = new Vector3( 500, 201, 320 );
@@ -352,7 +352,7 @@ public class NavigationSimulationTests
 		for ( int i = 0; i < 500; i++ ) simulation.Update( 0.02f );
 		Assert.IsTrue( agent.Partial );
 		Assert.AreEqual( (Vector3?)target, agent.State.Target );
-		var connected = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var connected = SyntheticNavMesh.Create( new() { UpperFloor = true, Link = true } );
 		Assert.IsTrue( mesh.UpdateTile( connected.GetTile( 0 ).data, 0 ).Succeeded() );
 		simulation.Revision++;
 		for ( int i = 0; i < 700; i++ ) simulation.Update( 0.02f );
@@ -387,7 +387,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void StoppingOnALinkReprojectsOntoTheCurrentFloor()
 	{
-		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var mesh = SyntheticNavMesh.Create( new() { UpperFloor = true, Link = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 320, 1, 320 ), Settings( mesh, false ) );
 		agent.MoveTo( new Vector3( 500, 201, 320 ) );
@@ -422,7 +422,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void VerticalLinkTraversesInBothDirections_10146()
 	{
-		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var mesh = SyntheticNavMesh.Create( new() { UpperFloor = true, Link = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 100, 1, 320 ), Settings( mesh ) );
 		foreach ( float height in new[] { 201f, 1f } )
@@ -438,7 +438,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void ManualLinkWaitsForCompletion_10146()
 	{
-		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var mesh = SyntheticNavMesh.Create( new() { UpperFloor = true, Link = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 100, 1, 320 ), Settings( mesh, false ) );
 		agent.MoveTo( new Vector3( 500, 201, 320 ) );
@@ -459,7 +459,7 @@ public class NavigationSimulationTests
 	[DataRow( -120, false )]
 	public void ManualLinkResumesFromActualLanding( int offset, bool ascending )
 	{
-		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true, obstacles: true );
+		var mesh = SyntheticNavMesh.Create( new() { UpperFloor = true, Link = true, Obstacles = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		float startHeight = ascending ? 1 : 201, endHeight = ascending ? 201 : 1;
 		var agent = simulation.Add( new Vector3( 320, startHeight, 320 ), Settings( mesh, false ) );
@@ -491,7 +491,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void ManualLinkCompletedOffMeshWaitsForPlacement()
 	{
-		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var mesh = SyntheticNavMesh.Create( new() { UpperFloor = true, Link = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 320, 1, 320 ), Settings( mesh, false ) );
 		var target = new Vector3( 500, 201, 320 );
@@ -513,7 +513,7 @@ public class NavigationSimulationTests
 	[TestMethod]
 	public void ShortLinkEntryIsPublishedBeforeCompletion()
 	{
-		var mesh = SyntheticNavMesh.Create( upperFloor: true, link: true );
+		var mesh = SyntheticNavMesh.Create( new() { UpperFloor = true, Link = true } );
 		var simulation = new NavigationSimulation( mesh, new object(), 8, 32 );
 		var agent = simulation.Add( new Vector3( 320, 1, 320 ), Settings( mesh ) with { MaxSpeed = 100000 } );
 		agent.MoveTo( new Vector3( 500, 201, 320 ) );
