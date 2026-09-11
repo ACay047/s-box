@@ -48,7 +48,7 @@ public static class RemoteDeps
 		new( "sdl3", "release-3.4.14", "thirdparty/sdl3" )
 			{ Rebuild = 2, RuntimeDir = ["../game/bin", "devtools/bin"] },
 		new( "dav1d", "1.5.3", "thirdparty/dav1d" ) { Rebuild = 2 },
-		new( "libcurl", "8.12.1", "thirdparty/libcurl" ) { Rebuild = 5 },
+		new( "libcurl", "8.12.1", "thirdparty/libcurl" ) { Rebuild = 6 },
 		new( "libopus", "v1.5.2", "thirdparty/libopus" ) { Rebuild = 2 },
 		new( "libvpx", "v1.16.0", "thirdparty/libvpx" ) { Rebuild = 2 },
 		new( "libwebp", "v1.5.0", "thirdparty/libwebp" ) { Rebuild = 2 },
