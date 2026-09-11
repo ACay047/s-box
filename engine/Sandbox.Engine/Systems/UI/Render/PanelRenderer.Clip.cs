@@ -102,6 +102,25 @@ internal partial class PanelRenderer
 		}
 
 		/// <summary>
+		/// Every clip lets the whole quad through, so its pixels can skip the clip test. Only for untransformed
+		/// clips; a rounded one is shrunk by its largest radius, plus the pixel the edge ramps over.
+		/// </summary>
+		public readonly bool Contains( in Rect quad )
+		{
+			if ( Invert ) return false;
+
+			for ( int i = 0; i < Count; i++ )
+			{
+				ref readonly var c = ref Clips[i];
+				if ( c.Matrix != Matrix.Identity ) return false;
+
+				if ( !c.Rect.Shrink( c.Radii.Largest + 1 ).IsInside( quad, fullyInside: true ) ) return false;
+			}
+
+			return true;
+		}
+
+		/// <summary>
 		/// Panel layers draw in their own space, where layout space is pixel space
 		/// </summary>
 		public void ClearMatrices()

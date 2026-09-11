@@ -334,7 +334,7 @@ namespace Sandbox.UI
 			{
 				_textBlock = new TextBlock();
 				_textBlock.LookupStyles = HtmlStyleLookup;
-				_textBlock.OnTextureChanged = TextTextureChanged;
+				_textBlock.OnChanged = TextChanged;
 			}
 
 			_textBlock.NoWrap = !Multiline;
@@ -371,10 +371,10 @@ namespace Sandbox.UI
 		Rect TextLayoutRect => new Rect( Box.RectInner.Position - caretScroll, Box.RectInner.Size );
 
 		/// <summary>
-		/// The panel clipping its background to this text holds the texture in its own descriptor,
-		/// so it rebuilds when the text is rerendered.
+		/// The text changed shape. A panel clipping its background to this text holds the mask in its own
+		/// descriptor, so it rebuilds too.
 		/// </summary>
-		void TextTextureChanged()
+		void TextChanged()
 		{
 			MarkRenderDirty();
 
@@ -489,8 +489,8 @@ namespace Sandbox.UI
 		public override void OnDraw()
 		{
 			if ( InlineOwner is not null ) return;
-			// Ensure texture is created if we have text but no texture yet
-			if ( _textBlock != null && _textBlock.Texture == null && !string.IsNullOrEmpty( _textBlock.Text ) )
+			// Make sure the text is laid out if we have text but no size yet
+			if ( _textBlock != null && _textBlock.BlockSize == default && !string.IsNullOrEmpty( _textBlock.Text ) )
 			{
 				_textBlock.SizeFinalized( Box.RectInner.Width, Box.RectInner.Height );
 			}

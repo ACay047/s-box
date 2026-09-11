@@ -1,4 +1,5 @@
 using Sandbox.Rendering;
+using System.Runtime.InteropServices;
 
 namespace Sandbox.UI;
 
@@ -43,6 +44,9 @@ internal class RenderLayer
 	// Draw descriptors
 	public List<RenderInstance> Instances = [];
 
+	// Glyphs packed once here; a ModeGlyphRun instance in Instances stands in for a range of them
+	public List<GPUGlyphInstance> Glyphs = [];
+
 	// These should be in the above list, but I'm bored of coding this
 	public List<BackdropDrawDescriptor> Backdrops = [];
 
@@ -69,15 +73,24 @@ internal class RenderLayer
 		} );
 	}
 
+	/// <summary>
+	/// Quads share a pass until the blend mode changes, and a change starts a new one - the batcher sorts by
+	/// pass, so this is what keeps them in the order they were built.
+	/// </summary>
+	void BeginPass( BlendMode blendMode )
+	{
+		if ( _buildAnyBox && blendMode != _buildBlendMode )
+			_buildPass++;
+
+		_buildBlendMode = blendMode;
+		_buildAnyBox = true;
+	}
+
 	public void AddBox( in BoxDrawDescriptor desc )
 	{
 		if ( desc.IsTwoPass ) return;
 
-		if ( _buildAnyBox && desc.OverrideBlendMode != _buildBlendMode )
-			_buildPass++;
-
-		_buildBlendMode = desc.OverrideBlendMode;
-		_buildAnyBox = true;
+		BeginPass( desc.OverrideBlendMode );
 
 		Instances.Add( new RenderInstance
 		{
@@ -90,6 +103,52 @@ internal class RenderLayer
 			BackgroundGradient = !desc.HasImage && desc.HasGradient ? desc.BackgroundGradient : default,
 			BorderShapeData = desc.BorderShapeData,
 		} );
+	}
+
+	/// <summary>
+	/// Text instances from <see cref="GpuFontText.Build"/>, drawn in order with the boxes. The block's gradient is
+	/// attached to the instances that want it, so it resolves per frame like a background gradient.
+	/// </summary>
+	public void AddText( List<GPUBoxInstance> instances, BlendMode blendMode, in GradientInfo gradient )
+	{
+		if ( instances.Count == 0 ) return;
+
+		BeginPass( blendMode );
+
+		// Plain glyphs pack into Glyphs and draw as one run, so a label costs one instance a frame rather than one per glyph
+		int runStart = -1;
+		Rect runRect = default;
+
+		foreach ( ref var inst in CollectionsMarshal.AsSpan( instances ) )
+		{
+			if ( GpuFontText.IsCompactGlyph( inst ) )
+			{
+				var rect = new Rect( inst.Rect.x, inst.Rect.y, inst.Rect.z, inst.Rect.w );
+				if ( runStart < 0 ) { runStart = Glyphs.Count; runRect = rect; }
+				else runRect.Add( rect );
+
+				Glyphs.Add( GPUGlyphInstance.From( inst ) );
+				continue;
+			}
+
+			CloseRun();
+			Instances.Add( new RenderInstance
+			{
+				GPU = inst,
+				BlendMode = blendMode,
+				Pass = _buildPass,
+				BackgroundGradient = GpuFontText.WantsGradient( inst ) ? gradient : default,
+			} );
+		}
+
+		CloseRun();
+
+		void CloseRun()
+		{
+			if ( runStart < 0 ) return;
+			Instances.Add( new RenderInstance { GPU = GpuFontText.GlyphRun( runRect, runStart, Glyphs.Count - runStart ), BlendMode = blendMode, Pass = _buildPass } );
+			runStart = -1;
+		}
 	}
 
 	public void AddOutline( in OutlineDrawDescriptor desc )
@@ -125,6 +184,7 @@ internal class RenderLayer
 	public void Clear()
 	{
 		Instances.Clear();
+		Glyphs.Clear();
 		Backdrops.Clear();
 		CustomEntries.Clear();
 		_buildPass = 0;

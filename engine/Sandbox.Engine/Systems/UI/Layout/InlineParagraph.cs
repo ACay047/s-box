@@ -39,7 +39,7 @@ internal sealed class InlineParagraph : IInlineContent, IDisposable
 	internal InlineParagraph( Panel panel )
 	{
 		_panel = panel;
-		Text.OnTextureChanged = panel.MarkRenderDirty;
+		Text.OnChanged = panel.MarkRenderDirty;
 	}
 
 	internal static bool CanFormat( Panel panel )

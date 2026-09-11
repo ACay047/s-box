@@ -76,6 +76,9 @@ public partial class Panel
 			} );
 		}
 
+		// Text is built into this and handed straight to the draw buffer, so one list per thread serves every call
+		[ThreadStatic] static List<GPUBoxInstance> _textInstances;
+
 		/// <summary>
 		/// Draws a text string within the given rectangle.
 		/// </summary>
@@ -91,23 +94,18 @@ public partial class Panel
 			var scale = buf.ScaleToScreen;
 
 			var scope = new TextRendering.Scope( text, color, size * scale, font );
-			var tb = TextRendering.GetOrCreateTextBlock( scope, flags, rect.Size == default ? new Vector2( 8096 ) : rect.Size );
-			tb.MakeReady();
-			var texture = tb.Texture;
-			if ( texture is null ) return;
+			var tb = TextRendering.GetOrCreateTextBlock( scope, flags, rect.Size );
+			if ( tb is null || tb.IsEmpty ) return;
 
-			var textRect = rect.Align( texture.Size, flags ).Floor();
-			var tint = Color.White;
-			tint.a *= buf.Opacity;
+			// Laid out like the texture would be, then drawn straight from the outlines
+			var textRect = rect.Align( tb.Size, flags ).Floor();
+			var options = GpuFontText.Options.For( scope );
+			options.Opacity = buf.Opacity;
 
-			buf.AddBox( new BoxDrawDescriptor( textRect, Color.Transparent )
-			{
-				BackgroundImage = texture,
-				BackgroundRect = new Vector4( 0, 0, textRect.Width, textRect.Height ),
-				BackgroundTint = tint,
-				BackgroundRepeat = BackgroundRepeat.Clamp,
-				FilterMode = FilterMode.Bilinear,
-			} );
+			_textInstances ??= new();
+			_textInstances.Clear();
+			GpuFontText.Build( tb.Layout, textRect.Position + tb.BlockOrigin, options, _textInstances );
+			buf.AddText( _textInstances );
 		}
 
 		/// <summary>

@@ -25,40 +25,7 @@ COMMON
 	DynamicCombo( D_WORLDPANEL, 0..1, Sys( ALL ) );
 	DynamicCombo( D_NO_ZTEST, 0..1, Sys( ALL ) );
 
-	struct BoxInstanceData
-	{
-		float4 Rect;
-		float4 Color;
-		float4 BorderRadius;	// horizontal radii ( top-left, top-right, bottom-left, bottom-right )
-		float4 BorderRadiusV;	// vertical radii, same order
-		float4 BorderSize;		// left, top, right, bottom
-		float4 BorderColorL;
-		float4 BorderColorT;
-		float4 BorderColorR;
-		float4 BorderColorB;
-		int TextureIndex;
-		int SamplerIndex;
-		int BackgroundRepeat;
-		float BackgroundAngle;
-		float4 BackgroundRect;
-		float4 BackgroundTint;
-		int BorderImageIndex;
-		int BorderImageSamplerIndex;
-		int BorderImageMode;
-		int BorderImageFill;
-		float4 BorderImageSlice;
-		float4 BorderImageTint;
-		int Flags;
-		int ScissorIndex;
-		int Mode;
-		int TransformIndex;
-		int InverseScissorIndex;
-		int TextMaskIndex;
-		int TextMaskSamplerIndex;
-		int BackgroundClip;
-		float4 BackgroundClipRect;	// box clip: the inset. text clip: where the mask sits.
-		int ShapeIndex;				// into BorderShapeBuffer, or -1 for a plain rounded rect
-	};
+	#include "ui/text.hlsl"
 
 	// Must match GPUBorderShape in GPUBoxInstance.cs
 	struct BorderShapeData
@@ -98,25 +65,34 @@ COMMON
 		ClipShape Clips[MAX_CLIPS];
 	};
 
-	// Must match GPUGradientInstance in GPUBoxInstance.cs. Stop colors are straight
-	// alpha in sRGB space; Angle is radians - 0 points down the panel for a linear
-	// gradient, straight up for a conic one.
-	struct GradientData
+
+	// Must match GPUGlyphInstance in GPUBoxInstance.cs. InstanceRefs holds a box index, or a glyph index with GLYPH_REF set.
+	struct GlyphInstanceData
 	{
-		float4 StopColors[8];
-		float StopOffsets[8];
-		int Count;
-		float Angle;
-		int Type;			// 0 linear, 1 radial, 2 conic
-		int SizeMode;		// radial: 0 farthest-side, 1 farthest-corner, 2 closest-side, 3 closest-corner
-		float2 Center;		// radial and conic
-		int CenterUnits;	// bit 0/1 set when that centre axis is a fraction of the box, not pixels
-		int Circle;			// radial: 1 for a circle instead of an ellipse
-		int StopUnits;		// bit per stop, set when that offset is a pixel length not a fraction
-		int Corner;			// linear: 1 top-left, 2 top-right, 3 bottom-left, 4 bottom-right, 0 for an angle
+		float2 Origin;			// layout px
+		uint Glyph;				// GlyphTable index, bit 31 set for aliased text
+		uint Size;				// half font size px | half blur sigma px << 16
+		uint ColorRG;			// half floats
+		uint ColorBA;
+		uint ScissorTransform;	// scissor index | transform index << 16, both 16 bit
+		uint Dilate;			// half outline dilation px
 	};
+	#define GLYPH_REF 0x80000000u		// on a ref, the quad is a glyph
+	#define GLYPH_ALIASED 0x80000000u	// on a glyph's Glyph field, the text is unantialiased
+
+	// The quad a glyph is drawn in: its outline bounds grown by any effect, the vertex shader adds the bloat
+	float4 GlyphRect( GlyphInstanceData g, GpuFontGlyph glyph )
+	{
+		float size = f16tof32( g.Size );
+		float grow = f16tof32( g.Dilate ) + f16tof32( g.Size >> 16 ) * 3.0;
+		float2 lo = g.Origin + glyph.Bounds.xy * size - grow;
+		float2 hi = g.Origin + glyph.Bounds.zw * size + grow;
+		return float4( lo, hi - lo );
+	}
 
 	StructuredBuffer<BoxInstanceData> BoxInstances < Attribute( "BoxInstances" ); >;
+	StructuredBuffer<GlyphInstanceData> GlyphInstances < Attribute( "GlyphInstances" ); >;
+	StructuredBuffer<uint> InstanceRefs < Attribute( "InstanceRefs" ); >;
 	StructuredBuffer<ScissorData> ScissorBuffer < Attribute( "ScissorBuffer" ); >;
 	StructuredBuffer<TransformData> TransformBuffer < Attribute( "TransformBuffer" ); >;
 	StructuredBuffer<GradientData> GradientBuffer < Attribute( "GradientBuffer" ); >;
@@ -170,15 +146,31 @@ VS
 	{
 		PixelInput o;
 
-		uint instanceIndex = nInstanceID + InstanceOffset;
+		uint instanceIndex = InstanceRefs[nInstanceID + InstanceOffset];
 		float2 corner = QuadPositions[nVertexID];
-		BoxInstanceData inst = BoxInstances[instanceIndex];
 
-		float2 vLocal = inst.Rect.xy - BOX_BLOAT + corner * ( inst.Rect.zw + BOX_BLOAT * 2.0 );
+		float4 rect, color;
+		int transformIndex;
+		if ( instanceIndex & GLYPH_REF )
+		{
+			GlyphInstanceData g = GlyphInstances[instanceIndex & ~GLYPH_REF];
+			rect = GlyphRect( g, GlyphTable[g.Glyph & ~GLYPH_ALIASED] );
+			color = float4( f16tof32( g.ColorRG ), f16tof32( g.ColorRG >> 16 ), f16tof32( g.ColorBA ), f16tof32( g.ColorBA >> 16 ) );
+			transformIndex = int( g.ScissorTransform >> 16 );
+		}
+		else
+		{
+			BoxInstanceData inst = BoxInstances[instanceIndex];
+			rect = inst.Rect;
+			color = inst.Color;
+			transformIndex = inst.TransformIndex;
+		}
+
+		float2 vLocal = rect.xy - BOX_BLOAT + corner * ( rect.zw + BOX_BLOAT * 2.0 );
 		float2 vPositionSs = vLocal;
 
 		float4 vViewport = g_vViewport;
-		float4x4 instTransform = TransformBuffer[inst.TransformIndex].Mat;
+		float4x4 instTransform = TransformBuffer[transformIndex].Mat;
 		float4 vMatrix = mul( LayerMat, mul( instTransform, float4( vPositionSs, 0, 1 ) ) );
 
 		#if !( D_WORLDPANEL )
@@ -206,12 +198,12 @@ VS
 		o.vPositionPanelSpace = mul( instTransform, float4( vLocal, 0, 1 ) );
 
 		// 0..1 across the box itself, so a little outside that in the bloat
-		o.vTexCoord.xy = ( vLocal - inst.Rect.xy ) / max( inst.Rect.zw, 0.0001 );
+		o.vTexCoord.xy = ( vLocal - rect.xy ) / max( rect.zw, 0.0001 );
 		o.vTexCoord.zw = vPositionSs / vViewport.zw;
 
 		// rgb can be HDR, alpha over 1 breaks alpha blending
-		o.vColor.rgb = UIDecodeColor( inst.Color.rgb );
-		o.vColor.a = saturate( inst.Color.a );
+		o.vColor.rgb = UIDecodeColor( color.rgb );
+		o.vColor.a = saturate( color.a );
 
 		o.iInstanceID = instanceIndex;
 
@@ -462,6 +454,27 @@ PS
 		return col;
 	}
 
+	// Modes 4 and 5: a glyph or a decoration line, evaluated straight from the outline in layout space. The pixel
+	// footprint comes from the layout position's screen derivatives, so world panels and scaled panels stay crisp.
+	float4 RenderText( BoxInstanceData inst, PixelInput i, out float flCoverage )
+	{
+		float2 p = inst.Rect.xy + i.vTexCoord.xy * inst.Rect.zw;
+		float ps = TextFootprint( p );
+
+		float4 col = i.vColor;
+
+		if ( inst.TextureIndex < 0 )
+		{
+			float4 g = EvaluateTextGradient( GradientBuffer[ -inst.TextureIndex - 1 ], inst.BorderImageSlice, p );
+			col.rgb = UIDecodeColor( g.rgb );
+			col.a *= saturate( g.a );
+		}
+
+		flCoverage = TextCoverage( inst, p, ps );
+		col.a *= flCoverage;
+		return col;
+	}
+
 	// Position along the gradient, 0 at its start and 1 at its end. Linear runs along a line through the box
 	// centre, long enough that its ends touch the corners; radial and conic measure out from their centre, all
 	// matching the web. gradLength comes back with it: how many pixels that 0..1 spans, which is what a stop
@@ -588,27 +601,26 @@ PS
 	}
 
 	// The instance's own clip stack, and for outset box-shadows the second one that keeps them out of their panel
-	float InstanceClipCoverage( BoxInstanceData inst, PixelInput i )
+	float InstanceClipCoverage( int scissorIndex, int inverseScissorIndex, PixelInput i )
 	{
 		float flCoverage = 1.0;
 
-		if ( inst.ScissorIndex >= 0 )
-			flCoverage *= ScissorCoverage( ScissorBuffer[inst.ScissorIndex], i.vPositionPanelSpace.xy );
+		if ( scissorIndex >= 0 )
+			flCoverage *= ScissorCoverage( ScissorBuffer[scissorIndex], i.vPositionPanelSpace.xy );
 
-		if ( inst.InverseScissorIndex >= 0 )
-			flCoverage *= ScissorCoverage( ScissorBuffer[inst.InverseScissorIndex], i.vPositionPanelSpace.xy );
+		if ( inverseScissorIndex >= 0 )
+			flCoverage *= ScissorCoverage( ScissorBuffer[inverseScissorIndex], i.vPositionPanelSpace.xy );
 
 		return flCoverage;
 	}
 
 	// flCoverage is how much of the pixel the shape covers, before opacity, see UISoftenHdrEdges
-	float4 RenderInstance( PixelInput i, out float flCoverage )
+	float4 RenderInstance( BoxInstanceData inst, PixelInput i, out float flCoverage )
 	{
-		BoxInstanceData inst = BoxInstances[i.iInstanceID];
-
 		if ( inst.Mode == 1 ) return RenderShadow( inst, i, false, flCoverage );
 		if ( inst.Mode == 2 ) return RenderShadow( inst, i, true, flCoverage );
 		if ( inst.Mode == 3 ) return RenderOutline( inst, i, flCoverage );
+		if ( inst.Mode == 4 || inst.Mode == 5 ) return RenderText( inst, i, flCoverage );
 
 		// Mode 0: standard box rendering
 		float2 boxSize = inst.Rect.zw;
@@ -755,13 +767,36 @@ PS
 
 	float4 MainPs( PixelInput i ) : SV_Target0
 	{
-		BoxInstanceData inst = BoxInstances[i.iInstanceID];
-
 		float flCoverage;
-		float4 col = RenderInstance( i, flCoverage );
+		float4 col;
+		int scissorIndex, inverseScissorIndex;
+
+		if ( i.iInstanceID & GLYPH_REF )
+		{
+			// A glyph evaluated straight from its outline, the footprint from the layout position's screen derivatives
+			GlyphInstanceData g = GlyphInstances[i.iInstanceID & ~GLYPH_REF];
+			GpuFontGlyph glyph = GlyphTable[g.Glyph & ~GLYPH_ALIASED];
+			float4 rect = GlyphRect( g, glyph );
+			float2 p = rect.xy + i.vTexCoord.xy * rect.zw;
+			float ps = TextFootprint( p );
+			float size = f16tof32( g.Size );
+
+			flCoverage = GlyphCoverage( glyph, ( p - g.Origin ) / size, size, f16tof32( g.Dilate ), f16tof32( g.Size >> 16 ), ps, ( g.Glyph & GLYPH_ALIASED ) != 0 );
+			col = i.vColor;
+			col.a *= flCoverage;
+			scissorIndex = int( g.ScissorTransform << 16 ) >> 16;
+			inverseScissorIndex = -1;
+		}
+		else
+		{
+			BoxInstanceData inst = BoxInstances[i.iInstanceID];
+			col = RenderInstance( inst, i, flCoverage );
+			scissorIndex = inst.ScissorIndex;
+			inverseScissorIndex = inst.InverseScissorIndex;
+		}
 
 		// Clip last, so nothing taking screen derivatives runs after the discard
-		float flClip = InstanceClipCoverage( inst, i );
+		float flClip = InstanceClipCoverage( scissorIndex, inverseScissorIndex, i );
 		if ( flClip <= 0.0 )
 			clip( -1 );
 

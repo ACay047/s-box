@@ -97,10 +97,9 @@ internal partial class PanelRenderer
 		public GPUBoxInstance Instance;
 		public BlendMode BlendMode;
 		public int Pass;
-		public int Order;
 	}
 
-	int deferredOrder;
+	ulong[] deferredKeys = new ulong[256];
 
 	// Tracks accumulated z-index while walking panels. Used as the high bits of the
 	// sort key so z-indexed children don't get reshuffled by the blend-mode sort.
@@ -254,15 +253,16 @@ internal partial class PanelRenderer
 			if ( !ri.BackgroundGradient.ColorOffsets.IsDefaultOrEmpty )
 				gpu.TextureIndex = -batcher.GetOrAddGradient( in ri.BackgroundGradient ) - 1;
 
-			gpu.ScissorIndex = scissorIndex;
+			gpu.ScissorIndex = Unclipped( gpu, scissor, transform ) ? -1 : scissorIndex;
 			gpu.TransformIndex = transformIndex;
 			gpu.InverseScissorIndex = ri.HasExtraScissor ? batcher.GetOrAddScissor( ri.ExtraScissor ) : -1;
 			gpu.ShapeIndex = batcher.GetOrAddShape( ri.BorderShapeData );
+			if ( gpu.Mode == GpuFontText.ModeGlyphRun ) batcher.AddGlyphs( desc.Glyphs, ref gpu );
 
 			// Pack z-depth in the high bits, per-panel intra-pass in the low bits.
 			int sortPass = zDepth * 256 + (ri.Pass & 0xFF);
 
-			deferredInstances.Add( new DeferredInstance { Instance = gpu, BlendMode = ri.BlendMode, Pass = sortPass, Order = deferredOrder++ } );
+			deferredInstances.Add( new DeferredInstance { Instance = gpu, BlendMode = ri.BlendMode, Pass = sortPass } );
 			Stats.InstanceCount++;
 		}
 	}
@@ -274,19 +274,20 @@ internal partial class PanelRenderer
 	{
 		if ( deferredInstances.Count == 0 ) return;
 
+		// Sort keys with the index in the low bits, the 300 byte instances stay put. Pass keeps all 32 bits (z-index
+		// reaches 99999 in the menu), sign flipped so a negative one still sorts first.
 		var span = CollectionsMarshal.AsSpan( deferredInstances );
-		span.Sort( ( a, b ) =>
-		{
-			int cmp = a.Pass - b.Pass;
-			if ( cmp != 0 ) return cmp;
-			cmp = (int)a.BlendMode - (int)b.BlendMode;
-			if ( cmp != 0 ) return cmp;
-			return a.Order - b.Order;
-		} );
+		int n = span.Length;
+		if ( deferredKeys.Length < n ) deferredKeys = new ulong[n * 2];
 
-		for ( int i = 0; i < span.Length; i++ )
+		for ( int i = 0; i < n; i++ )
+			deferredKeys[i] = (ulong)((uint)span[i].Pass ^ 0x80000000u) << 32 | (uint)(int)span[i].BlendMode << 24 | (uint)i; // index in the low 24 bits
+
+		Array.Sort( deferredKeys, 0, n );
+
+		for ( int i = 0; i < n; i++ )
 		{
-			ref var d = ref span[i];
+			ref var d = ref span[(int)(deferredKeys[i] & 0xFFFFFF)];
 
 			if ( d.BlendMode != pendingBlendMode && pendingInstances.Count > 0 )
 				FlushBatch( cl );
@@ -298,7 +299,6 @@ internal partial class PanelRenderer
 		FlushBatch( cl );
 
 		deferredInstances.Clear();
-		deferredOrder = 0;
 		zDepth = 0;
 	}
 
@@ -392,7 +392,7 @@ internal partial class PanelRenderer
 			gpu.InverseScissorIndex = ri.HasExtraScissor ? batcher.GetOrAddScissor( ri.ExtraScissor ) : -1;
 			gpu.ShapeIndex = batcher.GetOrAddShape( ri.BorderShapeData );
 
-			AddInstance( gpu, scissor, transform );
+			AddInstance( gpu, scissor, transform, desc.Glyphs );
 		}
 
 		// Fire any custom draws that come after all instances
@@ -426,10 +426,15 @@ internal partial class PanelRenderer
 			cl.Attributes.Set( "WorldMat", worldPanelMat.Value );
 	}
 
-	void AddInstance( GPUBoxInstance inst, GPUScissor scissor, Matrix transform )
+	// The vertex shader bloats quads by a pixel; world panels have no fixed layout to screen pixel ratio to measure the ramp in
+	bool Unclipped( in GPUBoxInstance inst, in GPUScissor scissor, in Matrix transform )
+		=> !isWorldPanelContext && transform == Matrix.Identity && scissor.Contains( new Rect( inst.Rect.x, inst.Rect.y, inst.Rect.z, inst.Rect.w ).Grow( 1 ) );
+
+	void AddInstance( GPUBoxInstance inst, GPUScissor scissor, Matrix transform, List<GPUGlyphInstance> glyphs )
 	{
-		inst.ScissorIndex = batcher.GetOrAddScissor( scissor );
+		inst.ScissorIndex = Unclipped( inst, scissor, transform ) ? -1 : batcher.GetOrAddScissor( scissor );
 		inst.TransformIndex = batcher.GetOrAddTransform( transform );
+		if ( inst.Mode == GpuFontText.ModeGlyphRun ) batcher.AddGlyphs( glyphs, ref inst );
 		pendingInstances.Add( inst );
 		Stats.InstanceCount++;
 	}
@@ -442,11 +447,10 @@ internal partial class PanelRenderer
 			ApplyDebugBatchVisualization();
 
 		Stats.FlushCount++;
-		Stats.DrawCalls++;
 
 		int combo = LayerStack.Count > 0 ? 0 : WorldPanelCombo;
 
-		batcher.Draw( pendingInstances, cl, combo, pendingBlendMode );
+		if ( batcher.Draw( pendingInstances, cl, combo, pendingBlendMode ) ) Stats.DrawCalls++;
 		pendingInstances.Clear();
 		pendingBlendMode = BlendMode.Normal;
 
@@ -465,6 +469,17 @@ internal partial class PanelRenderer
 		var span = CollectionsMarshal.AsSpan( pendingInstances );
 		for ( int i = 0; i < span.Length; i++ )
 		{
+			// A run's glyphs carry their own colour, they were placed when the instance was collected
+			if ( span[i].Mode == GpuFontText.ModeGlyphRun )
+			{
+				foreach ( ref var glyph in batcher.GlyphSpan( span[i].GlyphStart, span[i].GlyphCount ) )
+				{
+					glyph.SetColor( batchColor );
+				}
+
+				continue;
+			}
+
 			span[i].Color = batchColor;
 			span[i].TextureIndex = 0;
 		}

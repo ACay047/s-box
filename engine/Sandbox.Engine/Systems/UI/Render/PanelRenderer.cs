@@ -90,7 +90,6 @@ internal sealed partial class PanelRenderer
 			LayerStack?.Clear();
 			pendingInstances.Clear();
 			deferredInstances.Clear();
-			deferredOrder = 0;
 			zDepth = 0;
 			pendingBlendMode = BlendMode.Normal;
 			backdropGrabActive = false;
@@ -98,6 +97,7 @@ internal sealed partial class PanelRenderer
 
 			cl.Attributes.Set( "LayerMat", Matrix.Identity );
 			cl.Attributes.SetCombo( "D_WORLDPANEL", WorldPanelCombo );
+			GpuFontGlyphCache.Bind( cl.Attributes );
 			if ( worldPanelMat.HasValue )
 				cl.Attributes.Set( "WorldMat", worldPanelMat.Value );
 			InitScissor( Screen, cl );
@@ -116,6 +116,7 @@ internal sealed partial class PanelRenderer
 				FlushDeferredBatches( cl );
 				FlushBatch( cl );
 			}
+			batcher.Flush();
 
 			Stats.ScissorCount = batcher.ScissorCount;
 			Stats.GpuBufferCount = batcher.GpuBufferCount;

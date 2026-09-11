@@ -12,12 +12,12 @@ internal sealed partial class TextBlock
 	internal float InlineFinalWidth { get; private set; }
 	internal void FinalizeInlineWidth( float width )
 	{
-		if ( InlineFinalWidth != width ) ReleaseTexture();
+		if ( InlineFinalWidth != width ) Invalidate();
 		InlineFinalWidth = width;
 	}
 	internal Topten.RichTextKit.Style InlineStyle => Style.Copy();
 	internal int InlineStyleHash => FontHash;
-	internal void InvalidateInlineSelection() => ReleaseTexture();
+	internal void InvalidateInlineSelection() => Invalidate();
 	internal int InlineCaretCount => Block.CaretIndicies.Count - 1;
 	internal string GetInlineSelectedText( int start, int end )
 	{
@@ -50,8 +50,6 @@ internal sealed partial class TextBlock
 				text.Append( runs[i++].Text );
 			Block.AddText( text.ToString(), first.Style );
 		}
-		IsHdr |= runs.Any( r => r.Owner.ComputedStyle.FontColor?.IsHdr == true
-			|| r.Owner.ComputedStyle.TextDecorationColor?.IsHdr == true );
 	}
 
 	private static (string, float, int, bool, FontVariantNumeric, SkiaSharp.SKColorF, UnderlineStyle,
